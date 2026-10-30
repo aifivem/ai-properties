@@ -5,7 +5,7 @@ import {
   str,
   vec4,
   type Vec4,
-} from "@aicore-fivem/lib/shared"
+} from "@aicore-fivem/lib/shared";
 
 /** ai-properties' contracts and panel content. No natives. */
 
@@ -32,31 +32,31 @@ export const EVENTS = {
   sell: "ai-properties:sell",
   /** Server -> player: (id | null) the player is inside this property now (or left). */
   inside: "ai-properties:client:inside",
-} as const
+} as const;
 
 /** GlobalState key of a property that has an owner (true). */
-export const ownedKey = (id: string) => `prop:${id}`
+export const ownedKey = (id: string) => `prop:${id}`;
 /** ai-core metadata key: the property a character is inside (a character that left the game inside comes back at its door). */
-export const INSIDE_META = "property"
+export const INSIDE_META = "property";
 
-export type Access = "owner" | "key"
+export type Access = "owner" | "key";
 
 export interface Settings {
-  account: string
+  account: string;
   /** Percent of the price paid back on a sale. */
-  sellPercent: number
-  policeJobs: string[]
+  sellPercent: number;
+  policeJobs: string[];
   /** On-duty police can enter any property. */
-  policeEnter: boolean
-  stashSlots: number
-  stashWeight: number
+  policeEnter: boolean;
+  stashSlots: number;
+  stashWeight: number;
 }
 
 export function readSettings(raw: unknown): Settings {
-  const v = record(raw)
+  const v = record(raw);
   const jobs = Array.isArray(v.policeJobs)
     ? v.policeJobs.filter((j): j is string => typeof j === "string")
-    : []
+    : [];
   return {
     account: str(v.account, "bank", 32),
     sellPercent: int(v.sellPercent, 50, 0, 100),
@@ -64,39 +64,43 @@ export function readSettings(raw: unknown): Settings {
     policeEnter: bool(v.policeEnter, true),
     stashSlots: int(v.stashSlots, 40, 1, 200),
     stashWeight: int(v.stashWeight, 150_000, 1000, 10_000_000),
-  }
+  };
 }
 
 export interface Interior {
-  id: string
-  label: string
-  entry: Vec4
+  id: string;
+  label: string;
+  entry: Vec4;
 }
 
-const ZERO = { x: 0, y: 0, z: 0, heading: 0 }
+const ZERO = { x: 0, y: 0, z: 0, heading: 0 };
 
 export function readInteriors(raw: unknown): Map<string, Interior> {
-  const out = new Map<string, Interior>()
+  const out = new Map<string, Interior>();
   for (const [id, value] of Object.entries(record(raw))) {
-    const v = record(value)
-    out.set(id, { id, label: str(v.label, id, 48), entry: vec4(v.entry, ZERO) })
+    const v = record(value);
+    out.set(id, {
+      id,
+      label: str(v.label, id, 48),
+      entry: vec4(v.entry, ZERO),
+    });
   }
-  return out
+  return out;
 }
 
 export interface Property {
-  id: string
-  label: string
-  door: Vec4
-  interior: string
-  price: number
-  blip: boolean
+  id: string;
+  label: string;
+  door: Vec4;
+  interior: string;
+  price: number;
+  blip: boolean;
 }
 
 export function readProperties(raw: unknown): Map<string, Property> {
-  const out = new Map<string, Property>()
+  const out = new Map<string, Property>();
   for (const [id, value] of Object.entries(record(raw))) {
-    const v = record(value)
+    const v = record(value);
     out.set(id, {
       id,
       label: str(v.label, id, 48),
@@ -104,7 +108,7 @@ export function readProperties(raw: unknown): Map<string, Property> {
       interior: str(v.interior, "low", 48),
       price: int(v.price, 0, 0),
       blip: bool(v.blip, false),
-    })
+    });
   }
-  return out
+  return out;
 }

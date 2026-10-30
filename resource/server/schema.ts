@@ -1,7 +1,7 @@
-import type { PanelSchema } from "@aicore-fivem/shared"
+import type { PanelSchema } from "@aicore-fivem/shared";
 
 const int = (min: number, max: number) =>
-  ({ type: "number", min, max, integer: true }) as const
+  ({ type: "number", min, max, integer: true }) as const;
 
 /** ai-properties' panel: properties for sale (door, interior, price), the interiors and the rules. */
 export const propertiesSchema: PanelSchema = {
@@ -210,4 +210,4 @@ export const propertiesSchema: PanelSchema = {
       ],
     },
   ],
-}
+};
