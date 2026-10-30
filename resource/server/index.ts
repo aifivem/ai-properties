@@ -215,7 +215,10 @@ onClientCallback(EVENTS.stash, (source) => {
     !owners.accessOf(property.id, charId)
   )
     return fail("PROP_ERR_LOCKED");
-  const name = `property_${property.id}`;
+  // Per owner: a sold property's stash stays with the seller's character, the next buyer starts empty.
+  const owner = owners.get(property.id)?.owner;
+  if (owner === undefined) return fail("PROP_ERR_LOCKED");
+  const name = `property_${property.id}_${owner}`;
   const settings = content.settings.value;
   inventory.registerStash(
     name,

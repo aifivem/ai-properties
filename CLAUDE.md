@@ -11,7 +11,7 @@ Houses and apartments bought at their door: a private copy of the interior per p
 - The property a character is inside is ai-core metadata `property`; `onCharacter` `loaded` (also the replay after a restart) moves such a character to the door in bucket 0.
 - Door points: one point per property with a label function (buy / enter / locked); an ownership or access change re-adds only that property's point (its blip changes), a panel edit only the edited record, a settings edit (blip looks) all of them.
 - Blip looks of own properties and properties for sale are panel settings (`ownedBlip`, `saleBlip`); `settings` is `sync: "all"` for that (nothing secret in it).
-- Only the owner (inside the property) manages keys and sells; key holders enter and open the stash `property_<id>`. A key goes to the nearest player inside the same property (`nearestPlayerTo`).
+- Only the owner (inside the property) manages keys and sells; key holders enter and open the stash `property_<id>_<owner charId>` (per owner: after a sale the next buyer starts with an empty stash). Key changes wait while a sale is being written. A key goes to the nearest player inside the same property (`nearestPlayerTo`).
 - Exception to "no character data in own tables": `owner_name` and the key holders' `name` are kept so the owner's key list shows offline holders without asking ai-core per row (ai-core has no offline name lookup by char id). They may go stale after a rename.
 
 ## Contracts

@@ -250,6 +250,8 @@ const CORE = {
 	dutyChangedEvent: "ai-core:dutyChanged",
 	gangsChangedEvent: "ai-core:gangsChanged",
 	activeGangChangedEvent: "ai-core:activeGangChanged",
+	metaChangedEvent: "ai-core:metaChanged",
+	definitionsChangedEvent: "ai-core:definitionsChanged",
 	characterScreenEvent: "ai-core:characterScreen",
 	inventoryChangedEvent: "ai-core:inventoryChanged",
 	itemUsedEvent: "ai-core:itemUsed",
@@ -261,6 +263,9 @@ const CORE = {
 	clientPromptPressedEvent: "ai-core:client:promptPressed",
 	clientCacheEvent: "ai-core:client:cache",
 	clientHudVisibleEvent: "ai-core:client:hudVisible",
+	clientWorldSyncEvent: "ai-core:client:worldSync",
+	clientCancelProgressEvent: "ai-core:client:cancelProgress",
+	clientDefinitionsEvent: "ai-core:client:definitions",
 	vehicleTypeCallback: "ai-core:vehicleType",
 	interactionStateKey: "ai:interaction",
 	charactersCallback: "ai-core:characters",
@@ -736,7 +741,10 @@ var AdminPanel = class {
 	constructor(schema) {
 		this.schema = schema;
 		for (let [name, spec] of Object.entries(schema.files)) this.load(name, spec);
-		registerExport("AdminPanelSnapshot", () => this.snapshot()), registerExport("AdminPanelApply", (admin, patch) => this.apply(admin, patch)), onClientCallback(ADMIN.worldChangesCallback(this.resource), () => Object.fromEntries(this.worldChanges)), setImmediate(() => core$14.RegisterAdminPanel(this.resource));
+		registerExport("AdminPanelSnapshot", () => this.snapshot()), registerExport("AdminPanelApply", (admin, patch) => this.apply(admin, patch)), onClientCallback(ADMIN.worldChangesCallback(this.resource), () => Object.fromEntries(this.worldChanges), { rate: {
+			count: 4,
+			windowMs: 1e4
+		} }), setImmediate(() => core$14.RegisterAdminPanel(this.resource));
 	}
 	get(file) {
 		return this.data.get(file) ?? {};
@@ -15374,8 +15382,9 @@ var Group = class {
 	get front() {
 		return this.dues[this.head] ?? 0;
 	}
+	compactAt = 64;
 	push(job, due) {
-		this.count > this.mask && this.grow();
+		this.count >= this.compactAt && this.compact(), this.count > this.mask && this.grow();
 		let i = this.head + this.count & this.mask;
 		this.jobs[i] = job, this.gens[i] = job.gen, this.dues[i] = due, this.count++;
 	}
@@ -15388,6 +15397,17 @@ var Group = class {
 			let next = due + this.interval;
 			next <= now && (next = now + this.interval), this.push(job, next), job.call();
 		}
+	}
+	compact() {
+		let kept = 0;
+		for (let n = 0; n < this.count; n++) {
+			let i = this.head + n & this.mask, job = this.jobs[i];
+			if (!job || job.gen !== this.gens[i]) continue;
+			let k = this.head + kept & this.mask;
+			this.jobs[k] = job, this.gens[k] = this.gens[i] ?? 0, this.dues[k] = this.dues[i] ?? 0, kept++;
+		}
+		for (let n = kept; n < this.count; n++) this.jobs[this.head + n & this.mask] = void 0;
+		this.count = kept, this.compactAt = Math.max(64, kept * 2);
 	}
 	grow() {
 		let size = (this.mask + 1) * 2, jobs = Array(size), gens = Array(size).fill(0), dues = Array(size).fill(0);
@@ -15823,6 +15843,7 @@ const blip = {
 }, ownedFlags = new GlobalGroup("prop:", stateBoolean), log$1 = createLogger(ResourceName), owners = new class {
 	byProperty = new Map();
 	byChar = new Map();
+	selling = new Set();
 	async load() {
 		let owned = await mysql.query("SELECT property, char_id, owner_name FROM ai_properties_owned"), keys = await mysql.query("SELECT property, char_id, name FROM ai_properties_keys");
 		for (let r of owned) {
@@ -15878,13 +15899,13 @@ const blip = {
 	}
 	async sell(id) {
 		let o = this.byProperty.get(id);
-		if (!o || !await mysql.transaction([{
+		if (!o || this.selling.has(id) || (this.selling.add(id), !await mysql.transaction([{
 			query: "DELETE FROM ai_properties_keys WHERE property = ?",
 			values: [id]
 		}, {
 			query: "DELETE FROM ai_properties_owned WHERE property = ?",
 			values: [id]
-		}]) || this.byProperty.get(id) !== o) return null;
+		}]).finally(() => this.selling.delete(id)) || this.byProperty.get(id) !== o)) return null;
 		this.byProperty.delete(id);
 		let lost = [o.owner, ...o.keys.keys()];
 		for (let charId of lost) this.index(charId, id, null);
@@ -15892,14 +15913,14 @@ const blip = {
 	}
 	giveKey(id, charId, name) {
 		let o = this.byProperty.get(id);
-		o && o.owner !== charId && !o.keys.has(charId) && (o.keys.set(charId, name), this.index(charId, id, "key"), mysql.query("INSERT IGNORE INTO ai_properties_keys (property, char_id, name) VALUES (?, ?, ?)", [
+		!o || this.selling.has(id) || o.owner === charId || o.keys.has(charId) || (o.keys.set(charId, name), this.index(charId, id, "key"), mysql.query("INSERT IGNORE INTO ai_properties_keys (property, char_id, name) VALUES (?, ?, ?)", [
 			id,
 			charId,
 			name.slice(0, 64)
 		]).catch((error) => log$1.error("key save failed", error)));
 	}
 	takeKey(id, charId) {
-		return this.byProperty.get(id)?.keys.delete(charId) ? (this.index(charId, id, null), mysql.query("DELETE FROM ai_properties_keys WHERE property = ? AND char_id = ?", [id, charId]).catch((error) => log$1.error("key delete failed", error)), !0) : !1;
+		return this.selling.has(id) || !this.byProperty.get(id)?.keys.delete(charId) ? !1 : (this.index(charId, id, null), mysql.query("DELETE FROM ai_properties_keys WHERE property = ? AND char_id = ?", [id, charId]).catch((error) => log$1.error("key delete failed", error)), !0);
 	}
 }();
 function sendAccess(sourceOf, charId, id, access) {
@@ -15980,7 +16001,9 @@ onClientCallback(EVENTS.mine, (source) => {
 }, { lock: !0 }), onClientCallback(EVENTS.stash, (source) => {
 	let id = inside.get(source), property = id ? content.properties.get(id) : void 0, charId = charIdOf(source);
 	if (!property || charId === void 0 || !owners.accessOf(property.id, charId)) return fail("PROP_ERR_LOCKED");
-	let name = `property_${property.id}`, settings = content.settings.value;
+	let owner = owners.get(property.id)?.owner;
+	if (owner === void 0) return fail("PROP_ERR_LOCKED");
+	let name = `property_${property.id}_${owner}`, settings = content.settings.value;
 	return inventory.registerStash(name, property.label, settings.stashSlots, settings.stashWeight), inventory.openInventory(source, name) ? { ok: !0 } : fail("PROP_ERR_FAR");
 }), onClientCallback(EVENTS.keys, (source) => {
 	let property = ownedInside(source);

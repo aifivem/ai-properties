@@ -24,6 +24,8 @@ interface Ownership {
 class Owners {
   private readonly byProperty = new Map<string, Ownership>();
   private readonly byChar = new Map<number, Map<string, Access>>();
+  /** Properties whose sale is being written: no key changes until it settles (a key row could outlive the DELETE). */
+  private readonly selling = new Set<string>();
 
   async load(): Promise<void> {
     const owned = await mysql.query<
@@ -112,17 +114,20 @@ class Owners {
    */
   async sell(id: string): Promise<number[] | null> {
     const o = this.byProperty.get(id);
-    if (!o) return null;
-    const done = await mysql.transaction([
-      {
-        query: "DELETE FROM ai_properties_keys WHERE property = ?",
-        values: [id],
-      },
-      {
-        query: "DELETE FROM ai_properties_owned WHERE property = ?",
-        values: [id],
-      },
-    ]);
+    if (!o || this.selling.has(id)) return null;
+    this.selling.add(id);
+    const done = await mysql
+      .transaction([
+        {
+          query: "DELETE FROM ai_properties_keys WHERE property = ?",
+          values: [id],
+        },
+        {
+          query: "DELETE FROM ai_properties_owned WHERE property = ?",
+          values: [id],
+        },
+      ])
+      .finally(() => this.selling.delete(id));
     if (!done || this.byProperty.get(id) !== o) return null;
     this.byProperty.delete(id);
     const lost = [o.owner, ...o.keys.keys()];
@@ -133,7 +138,8 @@ class Owners {
 
   giveKey(id: string, charId: number, name: string): void {
     const o = this.byProperty.get(id);
-    if (!o || o.owner === charId || o.keys.has(charId)) return;
+    if (!o || this.selling.has(id) || o.owner === charId || o.keys.has(charId))
+      return;
     o.keys.set(charId, name);
     this.index(charId, id, "key");
     mysql
@@ -145,6 +151,7 @@ class Owners {
   }
 
   takeKey(id: string, charId: number): boolean {
+    if (this.selling.has(id)) return false;
     const o = this.byProperty.get(id);
     if (!o?.keys.delete(charId)) return false;
     this.index(charId, id, null);
