@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/interiors.schema.json",
   "low": {
     "label": "Small apartment",
     "entry": {

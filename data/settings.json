@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/settings.schema.json",
   "account": "bank",
   "sellPercent": 50,
   "policeJobs": [

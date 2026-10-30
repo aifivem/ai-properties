@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/properties.schema.json",
   "grove_1": {
     "label": "Grove Street 1",
     "door": {
