@@ -34,8 +34,8 @@ export const EVENTS = {
   inside: "ai-properties:client:inside",
 } as const;
 
-/** GlobalState key of a property that has an owner (true). */
-export const ownedKey = (id: string) => `prop:${id}`;
+/** GlobalState prefix of a property that has an owner (`prop:<id>`, true). */
+export const OWNED_PREFIX = "prop:";
 /** ai-core metadata key: the property a character is inside (a character that left the game inside comes back at its door). */
 export const INSIDE_META = "property";
 

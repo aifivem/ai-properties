@@ -1,7 +1,10 @@
+import { GlobalGroup, stateBoolean } from "@aicore-fivem/lib/server";
 import { mysql } from "@aicore-fivem/mysql";
 import { createLogger } from "@aicore-fivem/lib/shared";
 import { ResourceName } from "common";
-import { EVENTS, ownedKey, type Access } from "common/property";
+import { EVENTS, OWNED_PREFIX, type Access } from "common/property";
+
+const ownedFlags = new GlobalGroup(OWNED_PREFIX, stateBoolean);
 
 const log = createLogger(ResourceName);
 
@@ -36,7 +39,7 @@ class Owners {
     for (const r of keys)
       this.byProperty.get(r.property)?.keys.set(Number(r.char_id), r.name);
     for (const id of this.byProperty.keys())
-      GlobalState.set(ownedKey(id), true, true);
+      ownedFlags.set(id, true);
     log.info(`${this.byProperty.size} owned properties loaded`);
   }
 
@@ -82,7 +85,7 @@ class Owners {
       log.error(`buying ${id} failed`, error);
       return false;
     }
-    GlobalState.set(ownedKey(id), true, true);
+    ownedFlags.set(id, true);
     return true;
   }
 
@@ -90,7 +93,7 @@ class Owners {
     const o = this.byProperty.get(id);
     if (!o) return [];
     this.byProperty.delete(id);
-    GlobalState.set(ownedKey(id), false, true);
+    ownedFlags.set(id, false);
     await mysql.transaction([
       {
         query: "DELETE FROM ai_properties_keys WHERE property = ?",

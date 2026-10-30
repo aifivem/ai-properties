@@ -1,24 +1,17 @@
-import {
-  AdminWorld,
-  fadeOut,
-  loadLocaleTexts,
-  menu,
-  notify,
-  onServerEvent,
-  Points,
-  triggerServerCallback,
-} from "@aicore-fivem/lib/client";
+import { AdminWorld, fadeOut, GlobalGroup, loadLocaleTexts, menu, notify, onServerEvent, Points, stateBoolean, triggerServerCallback } from "@aicore-fivem/lib/client";
 import { record, sleep } from "@aicore-fivem/lib/shared";
 import { CORE } from "@aicore-fivem/shared";
 import { Locale } from "common";
 import {
   EVENTS,
-  ownedKey,
+  OWNED_PREFIX,
   readInteriors,
   readProperties,
   type Access,
   type Property,
 } from "common/property";
+
+const owned = new GlobalGroup(OWNED_PREFIX, stateBoolean);
 
 const world = new AdminWorld(["properties", "interiors"]);
 const texts = loadLocaleTexts();
@@ -70,7 +63,7 @@ class Homes {
   }
 
   private label(p: Property): string {
-    if (GlobalState[ownedKey(p.id)] !== true)
+    if (owned.get(p.id) !== true)
       return Locale("PROP_PROMPT_BUY", p.label, p.price);
     return this.access.has(p.id)
       ? Locale("PROP_PROMPT_ENTER", p.label)
@@ -81,7 +74,7 @@ class Homes {
     this.doors.clear();
     for (const p of content.properties.values()) {
       const mine = this.access.has(p.id);
-      const blip = mine || (p.blip && GlobalState[ownedKey(p.id)] !== true);
+      const blip = mine || (p.blip && owned.get(p.id) !== true);
       this.doors.add(p.id, {
         coords: p.door,
         label: this.label(p),
@@ -119,7 +112,7 @@ class Homes {
   }
 
   async door(p: Property): Promise<void> {
-    if (GlobalState[ownedKey(p.id)] !== true) {
+    if (owned.get(p.id) !== true) {
       const pick = await menu({
         title: p.label,
         items: [
@@ -203,13 +196,7 @@ world.onChange(
   "interiors",
   () => (content.interiors = readInteriors(world.get("interiors"))),
 );
-// The bag still holds the old value inside its change handler.
-AddStateBagChangeHandler(
-  "",
-  "global",
-  (_bag: string, key: string) =>
-    key.startsWith("prop:") && setTimeout(() => homes.rebuild(), 0),
-);
+owned.onChange(() => homes.rebuild());
 
 onServerEvent(
   EVENTS.access,
