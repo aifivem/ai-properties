@@ -48,10 +48,7 @@ createDatabaseTables(ResourceName, "sql/main.sql")
 
 const charIdOf = (source: number) => online.character(source)?.id;
 const sourceOf = (charId: number) => core.GetSourceByCharId(charId);
-const nameOf = (source: number) => {
-  const c = online.character(source);
-  return c ? `${c.firstname} ${c.lastname}` : GetPlayerName(String(source));
-};
+const nameOf = (source: number) => online.name(source);
 const isPolice = (source: number) =>
   online.onDutyIn(source, content.settings.value.policeJobs);
 

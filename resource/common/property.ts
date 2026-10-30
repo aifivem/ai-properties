@@ -1,7 +1,7 @@
 import {
   bool,
   int,
-  num,
+  readBlipStyle,
   record,
   str,
   vec4,
@@ -64,11 +64,7 @@ export interface BlipStyle {
 
 function readBlip(raw: unknown, fallback: BlipStyle): BlipStyle {
   const v = record(raw);
-  return {
-    sprite: int(v.sprite, fallback.sprite, 0, 1000),
-    color: int(v.color, fallback.color, 0, 100),
-    scale: num(v.scale, fallback.scale, 0.3, 2),
-  };
+  return readBlipStyle(v, { sprite: fallback.sprite, color: fallback.color, scale: fallback.scale });
 }
 
 export function readSettings(raw: unknown): Settings {
