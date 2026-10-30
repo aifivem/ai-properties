@@ -1,4 +1,15 @@
-import { AdminWorld, fadeOut, GlobalGroup, loadLocaleTexts, menu, notify, onServerEvent, Points, stateBoolean, triggerServerCallback } from "@aicore-fivem/lib/client";
+import {
+  AdminWorld,
+  fadeOut,
+  GlobalGroup,
+  loadLocaleTexts,
+  menu,
+  notify,
+  onServerEvent,
+  Points,
+  stateBoolean,
+  triggerServerCallback,
+} from "@aicore-fivem/lib/client";
 import { record, sleep } from "@aicore-fivem/lib/shared";
 import { CORE } from "@aicore-fivem/shared";
 import { Locale } from "common";

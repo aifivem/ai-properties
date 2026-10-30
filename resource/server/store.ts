@@ -38,8 +38,7 @@ class Owners {
       });
     for (const r of keys)
       this.byProperty.get(r.property)?.keys.set(Number(r.char_id), r.name);
-    for (const id of this.byProperty.keys())
-      ownedFlags.set(id, true);
+    for (const id of this.byProperty.keys()) ownedFlags.set(id, true);
     log.info(`${this.byProperty.size} owned properties loaded`);
   }
 
