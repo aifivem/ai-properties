@@ -50,6 +50,7 @@ export const propertiesSchema: PanelSchema = {
       listSub: "interior",
       createLabel: "ADMIN_NEW_PROPERTY",
       deleteLabel: "ADMIN_DELETE_PROPERTY",
+      deleteDesc: "ADMIN_DELETE_PROPERTY_DESC",
       cards: [
         {
           icon: "building-columns",
@@ -73,6 +74,7 @@ export const propertiesSchema: PanelSchema = {
       desc: "ADMIN_TAB_INTERIORS_DESC",
       createLabel: "ADMIN_NEW_INTERIOR",
       deleteLabel: "ADMIN_DELETE_INTERIOR",
+      deleteDesc: "ADMIN_DELETE_INTERIOR_DESC",
       cards: [
         {
           icon: "warehouse",

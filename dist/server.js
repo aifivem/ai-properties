@@ -25367,6 +25367,7 @@ const propertiesSchema = {
 			listSub: "interior",
 			createLabel: "ADMIN_NEW_PROPERTY",
 			deleteLabel: "ADMIN_DELETE_PROPERTY",
+			deleteDesc: "ADMIN_DELETE_PROPERTY_DESC",
 			cards: [{
 				icon: "building-columns",
 				title: "ADMIN_C_PROPERTY",
@@ -25418,6 +25419,7 @@ const propertiesSchema = {
 			desc: "ADMIN_TAB_INTERIORS_DESC",
 			createLabel: "ADMIN_NEW_INTERIOR",
 			deleteLabel: "ADMIN_DELETE_INTERIOR",
+			deleteDesc: "ADMIN_DELETE_INTERIOR_DESC",
 			cards: [{
 				icon: "warehouse",
 				title: "ADMIN_C_INTERIOR",

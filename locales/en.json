@@ -26,7 +26,7 @@
   "ADMIN_TAB_PROPERTIES": "Properties",
   "ADMIN_TAB_PROPERTIES_DESC": "Houses and apartments players buy at their door.",
   "ADMIN_NEW_PROPERTY": "New property",
-  "ADMIN_DELETE_PROPERTY": "Delete this property? An owner keeps the database row until it is sold.",
+  "ADMIN_DELETE_PROPERTY": "Delete property",
   "ADMIN_C_PROPERTY": "Property",
   "ADMIN_C_PROPERTY_DESC": "Each property is a private copy of its interior.",
   "ADMIN_F_LABEL": "Name",
@@ -42,7 +42,7 @@
   "ADMIN_TAB_INTERIORS": "Interiors",
   "ADMIN_TAB_INTERIORS_DESC": "Places players are taken to inside a property.",
   "ADMIN_NEW_INTERIOR": "New interior",
-  "ADMIN_DELETE_INTERIOR": "Delete this interior? Properties using it can no longer be entered.",
+  "ADMIN_DELETE_INTERIOR": "Delete interior",
   "ADMIN_C_INTERIOR": "Interior",
   "ADMIN_C_INTERIOR_DESC": "The property menu (exit, stash, keys, sell) is at the entry point.",
   "ADMIN_P_INTERIOR_LABEL": "Small apartment",
@@ -63,5 +63,7 @@
   "ADMIN_F_POLICE_ENTER": "Police can enter",
   "ADMIN_H_POLICE_ENTER": "On-duty police enter any owned property.",
   "ADMIN_F_POLICE_JOBS": "Police jobs",
-  "ADMIN_P_POLICE_JOBS": "police"
+  "ADMIN_P_POLICE_JOBS": "police",
+  "ADMIN_DELETE_PROPERTY_DESC": "An owner keeps the database row until it is sold.",
+  "ADMIN_DELETE_INTERIOR_DESC": "Properties using it can no longer be entered."
 }
