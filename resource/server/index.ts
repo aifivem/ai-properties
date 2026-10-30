@@ -1,4 +1,4 @@
-import { AdminPanel, aiLog, aiLogChannels, createDatabaseTables, notify, onClientCallback, optionalExport, resourceExport } from "@aicore-fivem/lib/server";
+import { AdminPanel, aiLog, aiLogChannels, createDatabaseTables, inventory, notify, onClientCallback, resourceExport } from "@aicore-fivem/lib/server";
 import { asArgs, createLogger } from "@aicore-fivem/lib/shared";
 import { CORE } from "@aicore-fivem/shared";
 import { Locale, ResourceName } from "common";
@@ -116,10 +116,9 @@ onClientCallback(EVENTS.stash, (source) => {
   const property = id ? content.properties.get(id) : undefined;
   const charId = core.GetCharacter(source)?.id;
   if (!property || charId === undefined || !owners.accessOf(property.id, charId)) return fail("PROP_ERR_LOCKED");
-  const inventory = optionalExport("ai-inventory");
   const name = `property_${property.id}`;
-  inventory?.RegisterStash(name, property.label, content.settings.stashSlots, content.settings.stashWeight);
-  return inventory?.OpenInventory(source, name) ? { ok: true } : fail("PROP_ERR_FAR");
+  inventory.registerStash(name, property.label, content.settings.stashSlots, content.settings.stashWeight);
+  return inventory.openInventory(source, name) ? { ok: true } : fail("PROP_ERR_FAR");
 });
 
 onClientCallback(EVENTS.keys, (source) => {
