@@ -1,13 +1,12 @@
+import { spec } from "@aicore-fivem/lib/shared";
 import type { PanelSchema } from "@aicore-fivem/shared";
 
-const int = (min: number, max: number) =>
-  ({ type: "number", min, max, integer: true }) as const;
 const blip = {
   type: "object",
   optional: true,
   fields: {
-    sprite: int(0, 1000),
-    color: int(0, 100),
+    sprite: spec.int(0, 1000),
+    color: spec.int(0, 100),
     scale: { type: "number", min: 0.3, max: 2 },
   },
 } as const;
@@ -22,7 +21,7 @@ export const propertiesSchema: PanelSchema = {
       sync: "all",
       sections: {
         account: { type: "text", lookup: "account", min: 2, max: 32 },
-        sellPercent: int(0, 100),
+        sellPercent: spec.int(0, 100),
         policeJobs: {
           type: "names",
           lookup: "job",
@@ -31,8 +30,8 @@ export const propertiesSchema: PanelSchema = {
           pattern: "^[a-z0-9_]{2,32}$",
         },
         policeEnter: { type: "bool" },
-        stashSlots: int(1, 200),
-        stashWeight: int(1000, 10_000_000),
+        stashSlots: spec.int(1, 200),
+        stashWeight: spec.int(1000, 10_000_000),
         ownedBlip: blip,
         saleBlip: blip,
       },
@@ -52,7 +51,7 @@ export const propertiesSchema: PanelSchema = {
         label: { type: "text", min: 1, max: 48 },
         door: { type: "vec4" },
         interior: { type: "text", min: 1, max: 48 },
-        price: int(0, 1_000_000_000),
+        price: spec.int(0, 1_000_000_000),
         blip: { type: "bool" },
       },
     },

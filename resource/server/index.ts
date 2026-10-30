@@ -52,10 +52,8 @@ const nameOf = (source: number) => {
   const c = online.character(source);
   return c ? `${c.firstname} ${c.lastname}` : GetPlayerName(String(source));
 };
-const isPolice = (source: number) => {
-  const duty = online.dutyJob(source);
-  return duty !== null && content.settings.value.policeJobs.includes(duty);
-};
+const isPolice = (source: number) =>
+  online.onDutyIn(source, content.settings.value.policeJobs);
 
 /**
  * Who is inside which property (server truth; also in the character's metadata for a rejoin) and the routing bucket

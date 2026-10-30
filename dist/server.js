@@ -36,7 +36,7 @@ var SourceLock = class {
 function num(value, fallback, min = -Infinity, max = Infinity) {
 	return typeof value == "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
-function int$1(value, fallback, min = -Infinity, max = Infinity) {
+function int(value, fallback, min = -Infinity, max = Infinity) {
 	return Math.round(num(value, fallback, min, max));
 }
 function bool(value, fallback) {
@@ -122,6 +122,29 @@ var FileViews = class {
 		parsed === null ? this.map.delete(key) : this.map.set(key, parsed);
 	}
 };
+// ../../../packages/lib/src/shared/lang.ts
+function formatText(template, args) {
+	return template.replace(/\{(\d+)\}/g, (match, index) => {
+		let value = args[Number(index)];
+		return value === void 0 ? match : String(value);
+	});
+}
+// ../../../packages/lib/src/shared/spec.ts
+const spec = {
+	int: (min, max, optional = !1) => ({
+		type: "number",
+		min,
+		max,
+		integer: !0,
+		...optional ? { optional } : {}
+	}),
+	num: (min, max, optional = !1) => ({
+		type: "number",
+		min,
+		max,
+		...optional ? { optional } : {}
+	})
+};
 // ../../../packages/lib/src/shared/index.ts
 function isRecord(value) {
 	return typeof value == "object" && !!value && !Array.isArray(value);
@@ -159,12 +182,6 @@ function previewJson(value, max) {
 		out += "}";
 	};
 	return walk(value, 0), out.slice(0, max);
-}
-function formatText(template, args) {
-	return template.replace(/\{(\d+)\}/g, (match, index) => {
-		let value = args[Number(index)];
-		return value === void 0 ? match : String(value);
-	});
 }
 function createLogger(resource) {
 	let prefix = `[${resource}]`;
@@ -505,6 +522,68 @@ function validate(spec, value, path) {
 		default: return spec;
 	}
 }
+// ../../../packages/lib/src/server/admin/edit.ts
+const DEFAULT_KEY = "^[a-z0-9_]{2,32}$";
+function imported(spec, value) {
+	let base = clone(spec.newRecord ?? {}), out = {};
+	for (let name of Object.keys(spec.sections)) {
+		let v = name in value ? value[name] : base[name];
+		v !== void 0 && (out[name] = clone(v));
+	}
+	return out;
+}
+function linked(spec, value, ctx) {
+	return spec.type === "text" && spec.records && typeof value == "string" && value !== "" && !(value in ctx.get(spec.records)) ? "ADMIN_ERR_LOOKUP" : null;
+}
+function checkEdit(patch, spec, ctx) {
+	let data = ctx.get(patch.file);
+	if (patch.action === "create") return spec.kind !== "records" || !new RegExp(spec.keyPattern ?? DEFAULT_KEY).test(patch.key) ? ERR.pattern : patch.key in data ? "ADMIN_ERR_EXISTS" : null;
+	if (patch.action === "delete") return spec.kind !== "records" || !(patch.key in data) ? ERR.type : spec.locked?.includes(patch.key) ? "ADMIN_ERR_LOCKED" : null;
+	if (patch.action === "import") {
+		if (spec.kind !== "records") return ERR.type;
+		let pattern = new RegExp(spec.keyPattern ?? DEFAULT_KEY);
+		for (let [key, value] of Object.entries(patch.records)) {
+			if (!pattern.test(key)) return ERR.pattern;
+			let record = imported(spec, value);
+			for (let [name, section] of Object.entries(spec.sections)) {
+				let refusal = validate(section, record[name], name);
+				if (refusal) return refusal.error;
+				let link = linked(section, record[name], ctx);
+				if (link) return link;
+			}
+			let ruled = ctx.rule(patch.file)?.(key, record);
+			if (ruled) return ruled;
+		}
+		return null;
+	}
+	let section = spec.sections[patch.section];
+	if (!section || spec.kind === "records" && (!patch.key || !(patch.key in data))) return ERR.type;
+	let refusal = validate(section, patch.value, patch.section);
+	if (refusal) return refusal.error;
+	let link = linked(section, patch.value, ctx);
+	if (link) return link;
+	let current = spec.kind === "records" ? data[patch.key ?? ""] : data, next = {
+		...isRecord(current) ? current : {},
+		[patch.section]: patch.value
+	};
+	return ctx.rule(patch.file)?.(patch.key, next) ?? null;
+}
+function applyEdit(data, patch, spec) {
+	if (patch.action === "import") {
+		for (let [key, value] of Object.entries(patch.records)) data[key] = imported(spec, value);
+		return Object.keys(patch.records);
+	}
+	if (patch.action === "create") {
+		let record = clone(spec.newRecord ?? {});
+		spec.labelPath && (record[spec.labelPath] = patch.label), data[patch.key] = record;
+	} else if (patch.action === "delete") delete data[patch.key];
+	else {
+		let target = spec.kind === "records" ? data[patch.key ?? ""] : data;
+		if (!isRecord(target)) return [];
+		patch.value === void 0 || patch.value === null ? delete target[patch.section] : target[patch.section] = clone(patch.value);
+	}
+	return [spec.kind === "records" ? patch.key : void 0];
+}
 // ../../../packages/lib/src/server/admin/jsonSchema.ts
 const SCHEMA_KEY = {
 	type: "string",
@@ -641,15 +720,7 @@ function writeSchema(resource, name, text, log) {
 	(0, node_fs_promises.mkdir)(dir, { recursive: !0 }).then(() => (0, node_fs_promises.writeFile)(`${dir}/${name}.schema.json`, text, "utf8")).catch((error) => log.error(`writing ${resource}/${path} failed`, error));
 }
 // ../../../packages/lib/src/server/admin/panel.ts
-const core$14 = resourceExport(CORE.resource), DEFAULT_KEY = "^[a-z0-9_]{2,32}$";
-function imported(spec, value) {
-	let base = clone(spec.newRecord ?? {}), out = {};
-	for (let name of Object.keys(spec.sections)) {
-		let v = name in value ? value[name] : base[name];
-		v !== void 0 && (out[name] = clone(v));
-	}
-	return out;
-}
+const core$14 = resourceExport(CORE.resource);
 var AdminPanel = class {
 	schema;
 	data = new Map();
@@ -706,7 +777,10 @@ var AdminPanel = class {
 				ok: !1,
 				error: ERR.type
 			};
-			let error = this.check(patch, spec);
+			let error = checkEdit(patch, spec, {
+				get: (file) => this.get(file),
+				rule: (file) => this.rules.get(file)
+			});
 			return error ? (this.log.warn(`admin ${admin} edit refused (${error}): ${previewJson(patch, 300)}`), {
 				ok: !1,
 				error
@@ -741,59 +815,12 @@ var AdminPanel = class {
 	commitAfter(file, key, value) {
 		setImmediate(() => this.commit(file, key, value));
 	}
-	linked(spec, value) {
-		return spec.type === "text" && spec.records && typeof value == "string" && value !== "" && !(value in this.get(spec.records)) ? "ADMIN_ERR_LOOKUP" : null;
-	}
-	check(patch, spec) {
-		let data = this.get(patch.file);
-		if (patch.action === "create") return spec.kind !== "records" || !new RegExp(spec.keyPattern ?? DEFAULT_KEY).test(patch.key) ? ERR.pattern : patch.key in data ? "ADMIN_ERR_EXISTS" : null;
-		if (patch.action === "delete") return spec.kind !== "records" || !(patch.key in data) ? ERR.type : spec.locked?.includes(patch.key) ? "ADMIN_ERR_LOCKED" : null;
-		if (patch.action === "import") {
-			if (spec.kind !== "records") return ERR.type;
-			let pattern = new RegExp(spec.keyPattern ?? DEFAULT_KEY);
-			for (let [key, value] of Object.entries(patch.records)) {
-				if (!pattern.test(key)) return ERR.pattern;
-				let record = imported(spec, value);
-				for (let [name, section] of Object.entries(spec.sections)) {
-					let refusal = validate(section, record[name], name);
-					if (refusal) return refusal.error;
-					let link = this.linked(section, record[name]);
-					if (link) return link;
-				}
-				let ruled = this.rules.get(patch.file)?.(key, record);
-				if (ruled) return ruled;
-			}
-			return null;
-		}
-		let section = spec.sections[patch.section];
-		if (!section || spec.kind === "records" && (!patch.key || !(patch.key in data))) return ERR.type;
-		let refusal = validate(section, patch.value, patch.section);
-		if (refusal) return refusal.error;
-		let link = this.linked(section, patch.value);
-		if (link) return link;
-		let current = spec.kind === "records" ? data[patch.key ?? ""] : data, next = {
-			...isRecord(current) ? current : {},
-			[patch.section]: patch.value
-		};
-		return this.rules.get(patch.file)?.(patch.key, next) ?? null;
-	}
 	store(patch, spec) {
-		let data = this.data.get(patch.file) ?? {};
-		if (patch.action === "create") {
-			let record = clone(spec.newRecord ?? {});
-			spec.labelPath && (record[spec.labelPath] = patch.label), data[patch.key] = record;
-		} else if (patch.action === "delete") delete data[patch.key];
-		else if (patch.action === "import") {
-			for (let [key, value] of Object.entries(patch.records)) data[key] = imported(spec, value);
+		let data = this.data.get(patch.file) ?? {}, keys = applyEdit(data, patch, spec);
+		if (keys.length !== 0) {
 			this.data.set(patch.file, data);
-			for (let key of Object.keys(patch.records)) this.changed(patch.file, key);
-			return;
-		} else {
-			let target = spec.kind === "records" ? data[patch.key ?? ""] : data;
-			if (!isRecord(target)) return;
-			patch.value === void 0 || patch.value === null ? delete target[patch.section] : target[patch.section] = clone(patch.value);
+			for (let key of keys) this.changed(patch.file, key);
 		}
-		this.data.set(patch.file, data), this.changed(patch.file, spec.kind === "records" ? patch.key : void 0);
 	}
 	changed(file, key) {
 		let spec = this.schema.files[file], data = this.get(file), value = key === void 0 ? data : data[key] ?? null;
@@ -850,42 +877,65 @@ const core$13 = resourceExport(CORE.resource), inventory = {
 	registerUsableItem: (name, handler) => core$13.RegisterUsableItem(name, handler),
 	getItemDefinition: (name) => core$13.GetItemDefinition(name)
 }, core$12 = resourceExport(CORE.resource);
+function reindex(index, source, before, after) {
+	for (let name of before) {
+		let set = index.get(name);
+		set && (set.delete(source), set.size === 0 && index.delete(name));
+	}
+	for (let name of after) {
+		let set = index.get(name);
+		set || index.set(name, set = new Set()), set.add(source);
+	}
+}
 var OnlinePlayers = class {
 	players = new Map();
 	onDuty = new Map();
+	jobIndex = new Map();
+	gangIndex = new Map();
 	started = !1;
 	start() {
 		if (this.started) return;
 		this.started = !0;
 		let load = (source, character) => {
-			this.put(source, character, (core$12.GetJobs(source) ?? []).map((m) => m.job), (core$12.GetGangs(source) ?? []).map((m) => m.gang)), this.setDuty(source, core$12.GetDutyJob(source));
+			this.drop(source), this.players.set(source, {
+				character,
+				jobs: [],
+				jobNames: [],
+				gangs: [],
+				gangNames: [],
+				duty: null
+			}), this.setJobs(source, core$12.GetJobs(source) ?? []), this.setGangs(source, core$12.GetGangs(source) ?? []), this.setDuty(source, core$12.GetDutyJob(source));
 		};
-		on(CORE.playerLoadedEvent, load), on(CORE.playerUnloadedEvent, (source) => this.drop(source)), on(CORE.jobsChangedEvent, (source, jobs) => {
-			let player = this.players.get(source);
-			player && (player.jobs = jobs.map((m) => m.job));
-		}), on(CORE.gangsChangedEvent, (source, gangs) => {
-			let player = this.players.get(source);
-			player && (player.gangs = gangs.map((m) => m.gang));
-		}), on(CORE.dutyChangedEvent, (source, job) => this.setDuty(source, job));
+		on(CORE.playerLoadedEvent, load), on(CORE.playerUnloadedEvent, (source) => this.drop(source)), on(CORE.jobsChangedEvent, (source, jobs) => this.setJobs(source, jobs)), on(CORE.gangsChangedEvent, (source, gangs) => this.setGangs(source, gangs)), on(CORE.dutyChangedEvent, (source, job) => this.setDuty(source, job));
 		for (let source of core$12.GetLoadedSources()) {
 			let character = core$12.GetCharacter(source);
 			character && load(source, character);
 		}
 	}
-	put(source, character, jobs, gangs) {
-		this.drop(source), this.players.set(source, {
-			character,
-			jobs,
-			gangs,
-			duty: null
-		});
-	}
 	drop(source) {
-		this.setDuty(source, null), this.players.delete(source);
+		let player = this.players.get(source);
+		player && (this.setDuty(source, null), reindex(this.jobIndex, source, player.jobNames, []), reindex(this.gangIndex, source, player.gangNames, []), this.players.delete(source));
+	}
+	setJobs(source, jobs) {
+		let player = this.players.get(source);
+		if (!player) return;
+		let names = jobs.map((m) => m.job);
+		reindex(this.jobIndex, source, player.jobNames, names), player.jobs = jobs, player.jobNames = names;
+	}
+	setGangs(source, gangs) {
+		let player = this.players.get(source);
+		if (!player) return;
+		let names = gangs.map((m) => m.gang);
+		reindex(this.gangIndex, source, player.gangNames, names), player.gangs = gangs, player.gangNames = names;
 	}
 	setDuty(source, job) {
 		let player = this.players.get(source);
-		if (!player || (player.duty && this.onDuty.get(player.duty)?.delete(source), player.duty = job, !job)) return;
+		if (!player) return;
+		if (player.duty) {
+			let set = this.onDuty.get(player.duty);
+			set?.delete(source), set?.size === 0 && this.onDuty.delete(player.duty);
+		}
+		if (player.duty = job, !job) return;
 		let set = this.onDuty.get(job);
 		set || this.onDuty.set(job, set = new Set()), set.add(source);
 	}
@@ -899,13 +949,35 @@ var OnlinePlayers = class {
 		return this.start(), this.players.get(source)?.character ?? null;
 	}
 	jobs(source) {
-		return this.start(), this.players.get(source)?.jobs ?? [];
+		return this.start(), this.players.get(source)?.jobNames ?? [];
 	}
 	gangs(source) {
-		return this.start(), this.players.get(source)?.gangs ?? [];
+		return this.start(), this.players.get(source)?.gangNames ?? [];
+	}
+	jobGrade(source, job) {
+		return this.start(), this.players.get(source)?.jobs.find((m) => m.job === job)?.grade ?? null;
+	}
+	gangGrade(source, gang) {
+		return this.start(), this.players.get(source)?.gangs.find((m) => m.gang === gang)?.grade ?? null;
+	}
+	jobMembers(job) {
+		return this.start(), this.jobIndex.get(job) ?? EMPTY;
+	}
+	gangMembers(gang) {
+		return this.start(), this.gangIndex.get(gang) ?? EMPTY;
 	}
 	dutyJob(source) {
 		return this.start(), this.players.get(source)?.duty ?? null;
+	}
+	onDutyIn(source, jobs) {
+		let duty = this.dutyJob(source);
+		return duty !== null && jobs.includes(duty);
+	}
+	countOnDuty(jobs) {
+		this.start();
+		let count = 0;
+		for (let job of jobs) count += this.onDuty.get(job)?.size ?? 0;
+		return count;
 	}
 	onDutyFor(job) {
 		return this.start(), this.onDuty.get(job) ?? EMPTY;
@@ -1189,9 +1261,10 @@ function readDebug() {
 		debugList = [];
 	}
 }
-readDebug(), setInterval(readDebug, 1e4);
+let debugReadAt = 0;
 function debugEnabled() {
-	return debugAll || debugList.includes(resource$2);
+	let now = Date.now();
+	return now - debugReadAt >= 1e4 && (debugReadAt = now, readDebug()), debugAll || debugList.includes(resource$2);
 }
 function push(list, record, max) {
 	list.push(record), list.length > max && list.splice(0, list.length - max);
@@ -15286,6 +15359,81 @@ async function createDatabaseTables(resource, file) {
 		else for (let [name, definition] of statement.columns) columns.has(name) || (await mysql.query(`ALTER TABLE \`${statement.table}\` ADD COLUMN ${definition}`), log$2.info(`^2added column ${statement.table}.${name}^7 (${resource})`));
 	}
 }
+// ../../../packages/lib/src/fivem/scheduler.ts
+var Group = class {
+	interval;
+	jobs = Array(8);
+	gens = Array(8).fill(0);
+	dues = Array(8).fill(0);
+	head = 0;
+	mask = 7;
+	count = 0;
+	constructor(interval) {
+		this.interval = interval;
+	}
+	get front() {
+		return this.dues[this.head] ?? 0;
+	}
+	push(job, due) {
+		this.count > this.mask && this.grow();
+		let i = this.head + this.count & this.mask;
+		this.jobs[i] = job, this.gens[i] = job.gen, this.dues[i] = due, this.count++;
+	}
+	run(now) {
+		for (let left = this.count; left > 0 && this.count > 0; left--) {
+			let i = this.head, due = this.dues[i] ?? 0;
+			if (due > now) return;
+			let job = this.jobs[i], gen = this.gens[i];
+			if (this.jobs[i] = void 0, this.head = i + 1 & this.mask, this.count--, !job || job.gen !== gen) continue;
+			let next = due + this.interval;
+			next <= now && (next = now + this.interval), this.push(job, next), job.call();
+		}
+	}
+	grow() {
+		let size = (this.mask + 1) * 2, jobs = Array(size), gens = Array(size).fill(0), dues = Array(size).fill(0);
+		for (let n = 0; n < this.count; n++) {
+			let i = this.head + n & this.mask;
+			jobs[n] = this.jobs[i], gens[n] = this.gens[i] ?? 0, dues[n] = this.dues[i] ?? 0;
+		}
+		this.jobs = jobs, this.gens = gens, this.dues = dues, this.head = 0, this.mask = size - 1;
+	}
+};
+new class {
+	groups = [];
+	byInterval = new Map();
+	tick = null;
+	active = 0;
+	nextDue = Infinity;
+	running = !1;
+	activate(job) {
+		job.gen++, this.active++;
+		let due = GetGameTimer() + job.interval, group = this.byInterval.get(job.interval);
+		group || (group = new Group(job.interval), this.byInterval.set(job.interval, group), this.groups.push(group)), group.push(job, due), due < this.nextDue && (this.nextDue = due), this.tick ??= setTick(this.onTick);
+	}
+	deactivate(job) {
+		job.gen++, this.active--, this.active === 0 && !this.running && this.halt();
+	}
+	halt() {
+		this.tick !== null && clearTick(this.tick), this.tick = null, this.groups.length = 0, this.byInterval.clear(), this.nextDue = Infinity;
+	}
+	onTick = () => {
+		let now = GetGameTimer();
+		if (now < this.nextDue) return;
+		let groups = this.groups;
+		this.running = !0;
+		for (let i = 0; i < groups.length; i++) {
+			let group = groups[i];
+			group && group.count > 0 && group.front <= now && group.run(now);
+		}
+		if (this.running = !1, this.active === 0) return this.halt();
+		let soonest = Infinity, kept = 0;
+		for (let i = 0; i < groups.length; i++) {
+			let group = groups[i];
+			group && (group.count === 0 ? this.byInterval.delete(group.interval) : (groups[kept++] = group, group.front < soonest && (soonest = group.front)));
+		}
+		groups.length = kept, this.nextDue = soonest;
+	};
+}();
 // ../../../packages/lib/src/fivem/state.ts
 const stateBoolean = (v) => typeof v == "boolean" ? v : void 0;
 IsDuplicityVersion();
@@ -15369,8 +15517,8 @@ const EVENTS = {
 function readBlip(raw, fallback) {
 	let v = record(raw);
 	return {
-		sprite: int$1(v.sprite, fallback.sprite, 0, 1e3),
-		color: int$1(v.color, fallback.color, 0, 100),
+		sprite: int(v.sprite, fallback.sprite, 0, 1e3),
+		color: int(v.color, fallback.color, 0, 100),
 		scale: num(v.scale, fallback.scale, .3, 2)
 	};
 }
@@ -15378,11 +15526,11 @@ function readSettings(raw) {
 	let v = record(raw), jobs = Array.isArray(v.policeJobs) ? v.policeJobs.filter((j) => typeof j == "string") : [];
 	return {
 		account: str(v.account, "bank", 32),
-		sellPercent: int$1(v.sellPercent, 50, 0, 100),
+		sellPercent: int(v.sellPercent, 50, 0, 100),
 		policeJobs: jobs.length > 0 ? jobs : ["police"],
 		policeEnter: bool(v.policeEnter, !0),
-		stashSlots: int$1(v.stashSlots, 40, 1, 200),
-		stashWeight: int$1(v.stashWeight, 15e4, 1e3, 1e7),
+		stashSlots: int(v.stashSlots, 40, 1, 200),
+		stashWeight: int(v.stashWeight, 15e4, 1e3, 1e7),
 		ownedBlip: readBlip(v.ownedBlip, {
 			sprite: 40,
 			color: 2,
@@ -15414,22 +15562,17 @@ function readProperty(id, v) {
 		label: str(v.label, id, 48),
 		door: vec4(v.door, ZERO),
 		interior: str(v.interior, "low", 48),
-		price: int$1(v.price, 0, 0),
+		price: int(v.price, 0, 0),
 		blip: bool(v.blip, !1)
 	};
 }
 // resource/server/schema.ts
-const int = (min, max) => ({
-	type: "number",
-	min,
-	max,
-	integer: !0
-}), blip = {
+const blip = {
 	type: "object",
 	optional: !0,
 	fields: {
-		sprite: int(0, 1e3),
-		color: int(0, 100),
+		sprite: spec.int(0, 1e3),
+		color: spec.int(0, 100),
 		scale: {
 			type: "number",
 			min: .3,
@@ -15450,7 +15593,7 @@ const int = (min, max) => ({
 					min: 2,
 					max: 32
 				},
-				sellPercent: int(0, 100),
+				sellPercent: spec.int(0, 100),
 				policeJobs: {
 					type: "names",
 					lookup: "job",
@@ -15459,8 +15602,8 @@ const int = (min, max) => ({
 					pattern: "^[a-z0-9_]{2,32}$"
 				},
 				policeEnter: { type: "bool" },
-				stashSlots: int(1, 200),
-				stashWeight: int(1e3, 1e7),
+				stashSlots: spec.int(1, 200),
+				stashWeight: spec.int(1e3, 1e7),
 				ownedBlip: blip,
 				saleBlip: blip
 			}
@@ -15493,7 +15636,7 @@ const int = (min, max) => ({
 					min: 1,
 					max: 48
 				},
-				price: int(0, 1e9),
+				price: spec.int(0, 1e9),
 				blip: { type: "bool" }
 			}
 		},
@@ -15773,10 +15916,7 @@ aiLogChannels({ properties: {} }), createDatabaseTables(ResourceName, "sql/main.
 const charIdOf = (source) => online.character(source)?.id, sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => {
 	let c = online.character(source);
 	return c ? `${c.firstname} ${c.lastname}` : GetPlayerName(String(source));
-}, isPolice = (source) => {
-	let duty = online.dutyJob(source);
-	return duty !== null && content.settings.value.policeJobs.includes(duty);
-}, interiors = new class {
+}, isPolice = (source) => online.onDutyIn(source, content.settings.value.policeJobs), interiors = new class {
 	inside = new Map();
 	worlds = new Map();
 	move(source, at, id) {

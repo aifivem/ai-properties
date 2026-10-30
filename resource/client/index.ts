@@ -1,6 +1,7 @@
 import {
   AdminWorld,
   callAction,
+  fadeIn,
   fadeOut,
   GlobalGroup,
   menu,
@@ -190,7 +191,7 @@ class Homes {
 /** Enter / exit: the screen goes black first; the server's `inside` event teleports and lifts the fade. */
 async function move(name: string, args: unknown[] = []): Promise<void> {
   await fadeOut();
-  if (!(await call(name, args))) DoScreenFadeIn(300);
+  if (!(await call(name, args))) await fadeIn(300);
 }
 
 const homes = new Homes();
