@@ -1,4 +1,4 @@
-import { AdminWorld, hidePrompt, loadLocaleTexts, menu, notify, onPromptPressed, onServerEvent, showPrompt, triggerServerCallback, Zones } from "@aicore-fivem/lib/client";
+import { AdminWorld, fadeOut, loadLocaleTexts, menu, notify, onServerEvent, Points, triggerServerCallback } from "@aicore-fivem/lib/client";
 import { record, sleep } from "@aicore-fivem/lib/shared";
 import { CORE } from "@aicore-fivem/shared";
 import { Locale } from "common";
@@ -7,8 +7,6 @@ import { EVENTS, ownedKey, readInteriors, readProperties, type Access, type Prop
 const world = new AdminWorld(["properties", "interiors"]);
 const texts = loadLocaleTexts();
 const content = { properties: readProperties(world.get("properties")), interiors: readInteriors(world.get("interiors")) };
-const BLIP_TEXT = "AIPROP_BLIP";
-AddTextEntry(BLIP_TEXT, "~a~");
 const errorText = (v: unknown, fallback: string): string => {
   const key = typeof record(v).error === "string" ? String(record(v).error) : fallback;
   return texts[key] ?? key;
@@ -20,14 +18,13 @@ const call = async (name: string, args: unknown[] = []) => {
 };
 
 /**
- * Doors with prompts (buy, enter, locked), blips of the player's properties and properties for sale, and the
+ * Door points (buy, enter, locked), blips of the player's properties and properties for sale, and the
  * property menu at the interior entry while inside. Access comes as one snapshot, then deltas.
  */
 class Homes {
   private readonly access = new Map<string, Access>();
-  private readonly doors = new Zones();
-  private readonly inner = new Zones();
-  private blips: number[] = [];
+  private readonly doors = new Points();
+  private readonly inner = new Points();
   insideId: string | null = null;
 
   async load(): Promise<void> {
@@ -51,33 +48,27 @@ class Homes {
 
   rebuild(): void {
     this.doors.clear();
-    for (const blip of this.blips) RemoveBlip(blip);
-    this.blips = [];
     for (const p of content.properties.values()) {
-      const id = `prop:${p.id}`;
-      this.doors.add(id, { shape: { type: "sphere", center: p.door, radius: 1.5 }, interval: 500, onEnter: () => showPrompt(id, this.label(p)), onExit: () => hidePrompt(id) });
       const mine = this.access.has(p.id);
-      if (!mine && !(p.blip && GlobalState[ownedKey(p.id)] !== true)) continue;
-      const blip = AddBlipForCoord(p.door.x, p.door.y, p.door.z);
-      SetBlipSprite(blip, mine ? 40 : 350);
-      SetBlipColour(blip, mine ? 2 : 0);
-      SetBlipScale(blip, 0.7);
-      SetBlipAsShortRange(blip, true);
-      BeginTextCommandSetBlipName(BLIP_TEXT);
-      AddTextComponentSubstringPlayerName(p.label);
-      EndTextCommandSetBlipName(blip);
-      this.blips.push(blip);
+      const blip = mine || (p.blip && GlobalState[ownedKey(p.id)] !== true);
+      this.doors.add(p.id, {
+        coords: p.door,
+        label: this.label(p),
+        icon: "house",
+        radius: 1.5,
+        blip: blip ? { sprite: mine ? 40 : 350, color: mine ? 2 : 0, scale: 0.7, label: p.label } : undefined,
+        onPressed: () => this.door(p),
+      });
     }
   }
 
   setInside(id: string | null): void {
     this.insideId = id;
     this.inner.clear();
-    hidePrompt("prop:inside");
     const property = id ? content.properties.get(id) : undefined;
     const interior = property ? content.interiors.get(property.interior) : undefined;
     if (!interior) return;
-    this.inner.add("prop:inside", { shape: { type: "sphere", center: interior.entry, radius: 1.5 }, interval: 400, onEnter: () => showPrompt("prop:inside", Locale("PROP_PROMPT_MENU")), onExit: () => hidePrompt("prop:inside") });
+    this.inner.add("inside", { coords: interior.entry, label: Locale("PROP_PROMPT_MENU"), icon: "bars", radius: 1.5, interval: 400, onPressed: () => this.insideMenu() });
   }
 
   async door(p: Property): Promise<void> {
@@ -121,8 +112,7 @@ class Homes {
 
 /** Runs a move behind a short screen fade. */
 async function fade(move: () => Promise<unknown>): Promise<void> {
-  DoScreenFadeOut(300);
-  await sleep(350);
+  await fadeOut();
   await move();
   await sleep(400);
   DoScreenFadeIn(300);
@@ -136,7 +126,8 @@ world.onChange("properties", () => {
   homes.rebuild();
 });
 world.onChange("interiors", () => (content.interiors = readInteriors(world.get("interiors"))));
-AddStateBagChangeHandler("", "global", (_bag: string, key: string) => key.startsWith("prop:") && homes.rebuild());
+// The bag still holds the old value inside its change handler.
+AddStateBagChangeHandler("", "global", (_bag: string, key: string) => key.startsWith("prop:") && setTimeout(() => homes.rebuild(), 0));
 
 onServerEvent(
   EVENTS.access,
@@ -144,9 +135,3 @@ onServerEvent(
   (id, access) => homes.setAccess(id, access),
 );
 onServerEvent(EVENTS.inside, { args: ([id]): [string | null] | null => (id == null ? [null] : typeof id === "string" ? [id] : null) }, (id) => homes.setInside(id));
-
-onPromptPressed((id) => {
-  if (id === "prop:inside") return void homes.insideMenu();
-  const property = id.startsWith("prop:") ? content.properties.get(id.slice(5)) : undefined;
-  if (property) void homes.door(property);
-});
