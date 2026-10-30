@@ -1,6 +1,6 @@
 # ai-properties
 
-Houses and apartments bought at their door: a private copy of the interior per property (routing bucket), a stash, keys for other characters, selling back, police entry. Depends on ai-core (characters, money, metadata, menu, prompts); uses the active inventory through ai-core's inventory layer (lib `inventory`) for the stash. Research: `docs/research/ai-properties.md`.
+Houses and apartments bought at their door: a private copy of the interior per property (routing bucket), a stash, keys for other characters, selling back, police entry. Depends on ai-core (characters, money, metadata, menu, prompts); uses the active inventory through ai-core's inventory layer (lib `inventory`) for the stash.
 
 ## Decisions
 
