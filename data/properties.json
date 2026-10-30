@@ -1,0 +1,14 @@
+{
+  "grove_1": {
+    "label": "Grove Street 1",
+    "door": {
+      "x": -14.65,
+      "y": -1441.68,
+      "z": 31.1,
+      "heading": 180
+    },
+    "interior": "low",
+    "price": 75000,
+    "blip": false
+  }
+}

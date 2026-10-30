@@ -1,0 +1,10 @@
+{
+  "account": "bank",
+  "sellPercent": 50,
+  "policeJobs": [
+    "police"
+  ],
+  "policeEnter": true,
+  "stashSlots": 40,
+  "stashWeight": 150000
+}
