@@ -19,6 +19,7 @@ dependencies {
 
 files {
 	'locales/*.json',
+	'data/settings.json',
 	'data/properties.json',
 	'data/interiors.json',
 }

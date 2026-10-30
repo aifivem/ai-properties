@@ -1,6 +1,7 @@
 import {
   bool,
   int,
+  num,
   record,
   str,
   vec4,
@@ -16,7 +17,7 @@ export const EVENTS = {
   access: "ai-properties:client:access",
   /** Callback: (id) -> { ok } buys the property at its door. */
   buy: "ai-properties:buy",
-  /** Callback: (id) -> { ok } enters the property's interior. */
+  /** Callback: (id) -> { ok } enters the property's interior (the move arrives as `inside`). */
   enter: "ai-properties:enter",
   /** Callback: () -> { ok } leaves the interior through the door. */
   exit: "ai-properties:exit",
@@ -30,7 +31,7 @@ export const EVENTS = {
   takeKey: "ai-properties:takeKey",
   /** Callback: () -> { ok } sells the property the player owns and is in. */
   sell: "ai-properties:sell",
-  /** Server -> player: (id | null) the player is inside this property now (or left). */
+  /** Server -> player: (id | null, to: Vec4) the player is inside this property now (or left): teleport to `to`. */
   inside: "ai-properties:client:inside",
 } as const;
 
@@ -50,6 +51,24 @@ export interface Settings {
   policeEnter: boolean;
   stashSlots: number;
   stashWeight: number;
+  /** Map blip of the player's own properties and of properties for sale. */
+  ownedBlip: BlipStyle;
+  saleBlip: BlipStyle;
+}
+
+export interface BlipStyle {
+  sprite: number;
+  color: number;
+  scale: number;
+}
+
+function readBlip(raw: unknown, fallback: BlipStyle): BlipStyle {
+  const v = record(raw);
+  return {
+    sprite: int(v.sprite, fallback.sprite, 0, 1000),
+    color: int(v.color, fallback.color, 0, 100),
+    scale: num(v.scale, fallback.scale, 0.3, 2),
+  };
 }
 
 export function readSettings(raw: unknown): Settings {
@@ -64,6 +83,8 @@ export function readSettings(raw: unknown): Settings {
     policeEnter: bool(v.policeEnter, true),
     stashSlots: int(v.stashSlots, 40, 1, 200),
     stashWeight: int(v.stashWeight, 150_000, 1000, 10_000_000),
+    ownedBlip: readBlip(v.ownedBlip, { sprite: 40, color: 2, scale: 0.7 }),
+    saleBlip: readBlip(v.saleBlip, { sprite: 350, color: 0, scale: 0.7 }),
   };
 }
 
@@ -75,17 +96,9 @@ export interface Interior {
 
 const ZERO = { x: 0, y: 0, z: 0, heading: 0 };
 
-export function readInteriors(raw: unknown): Map<string, Interior> {
-  const out = new Map<string, Interior>();
-  for (const [id, value] of Object.entries(record(raw))) {
-    const v = record(value);
-    out.set(id, {
-      id,
-      label: str(v.label, id, 48),
-      entry: vec4(v.entry, ZERO),
-    });
-  }
-  return out;
+/** One interior record (`panel.records` / `world.records`). */
+export function readInterior(id: string, v: Record<string, unknown>): Interior {
+  return { id, label: str(v.label, id, 48), entry: vec4(v.entry, ZERO) };
 }
 
 export interface Property {
@@ -97,18 +110,14 @@ export interface Property {
   blip: boolean;
 }
 
-export function readProperties(raw: unknown): Map<string, Property> {
-  const out = new Map<string, Property>();
-  for (const [id, value] of Object.entries(record(raw))) {
-    const v = record(value);
-    out.set(id, {
-      id,
-      label: str(v.label, id, 48),
-      door: vec4(v.door, ZERO),
-      interior: str(v.interior, "low", 48),
-      price: int(v.price, 0, 0),
-      blip: bool(v.blip, false),
-    });
-  }
-  return out;
+/** One property record (`panel.records` / `world.records`). */
+export function readProperty(id: string, v: Record<string, unknown>): Property {
+  return {
+    id,
+    label: str(v.label, id, 48),
+    door: vec4(v.door, ZERO),
+    interior: str(v.interior, "low", 48),
+    price: int(v.price, 0, 0),
+    blip: bool(v.blip, false),
+  };
 }

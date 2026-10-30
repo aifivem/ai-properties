@@ -1,65 +1,58 @@
 import {
   AdminWorld,
+  callAction,
   fadeOut,
   GlobalGroup,
-  loadLocaleTexts,
   menu,
-  notify,
   onServerEvent,
+  player,
   Points,
   stateBoolean,
-  triggerServerCallback,
 } from "@aicore-fivem/lib/client";
-import { record, sleep } from "@aicore-fivem/lib/shared";
+import { isRecord, vec4, type Vec4 } from "@aicore-fivem/lib/shared";
 import { CORE } from "@aicore-fivem/shared";
 import { Locale } from "common";
 import {
   EVENTS,
   OWNED_PREFIX,
-  readInteriors,
-  readProperties,
+  readInterior,
+  readProperty,
+  readSettings,
   type Access,
   type Property,
 } from "common/property";
 
 const owned = new GlobalGroup(OWNED_PREFIX, stateBoolean);
 
-const world = new AdminWorld(["properties", "interiors"]);
-const texts = loadLocaleTexts();
+const world = new AdminWorld(["settings", "properties", "interiors"]);
 const content = {
-  properties: readProperties(world.get("properties")),
-  interiors: readInteriors(world.get("interiors")),
+  settings: world.view("settings", readSettings),
+  properties: world.records("properties", readProperty),
+  interiors: world.records("interiors", readInterior),
 };
-const errorText = (v: unknown, fallback: string): string => {
-  const key =
-    typeof record(v).error === "string" ? String(record(v).error) : fallback;
-  return texts[key] ?? key;
-};
-const call = async (name: string, args: unknown[] = []) => {
-  const result = record(
-    await triggerServerCallback(name, args).catch(() => null),
-  );
-  if (result.ok !== true) notify(errorText(result, "PROP_ERR_FAR"), "error");
-  return result;
-};
+const FALLBACK = { fallback: "PROP_ERR_FAR" };
+const call = (name: string, args: unknown[] = []) =>
+  callAction(name, args, FALLBACK);
 
 /**
- * Door points (buy, enter, locked), blips of the player's properties and properties for sale, and the
- * property menu at the interior entry while inside. Access comes as one snapshot, then deltas.
+ * Door points (buy, enter, locked; the label follows ownership), blips of the player's properties and properties for
+ * sale, and the property menu at the interior entry while inside. Access comes as one snapshot, then deltas; a change
+ * re-adds only that property's point.
  */
 class Homes {
   private readonly access = new Map<string, Access>();
   private readonly doors = new Points();
   private readonly inner = new Points();
-  insideId: string | null = null;
 
   async load(): Promise<void> {
-    const result = record(
-      await triggerServerCallback(EVENTS.mine, []).catch(() => null),
-    );
+    const reply = await callAction(EVENTS.mine, [], {
+      ...FALLBACK,
+      silent: true,
+    });
     this.access.clear();
-    for (const row of Array.isArray(result.list) ? result.list.map(record) : [])
+    for (const row of Array.isArray(reply?.list) ? reply.list : [])
       if (
+        isRecord(row) &&
         typeof row.id === "string" &&
         (row.access === "owner" || row.access === "key")
       )
@@ -70,7 +63,7 @@ class Homes {
   setAccess(id: string, access: Access | false): void {
     if (access) this.access.set(id, access);
     else this.access.delete(id);
-    this.rebuild();
+    this.update(id);
   }
 
   private label(p: Property): string {
@@ -81,31 +74,36 @@ class Homes {
       : Locale("PROP_PROMPT_LOCKED", p.label);
   }
 
+  /** Adds (or replaces) one property's door point; its blip follows ownership and access. */
+  private add(p: Property): void {
+    const mine = this.access.has(p.id);
+    const forSale = p.blip && owned.get(p.id) !== true;
+    const style = mine
+      ? content.settings.value.ownedBlip
+      : content.settings.value.saleBlip;
+    this.doors.add(p.id, {
+      coords: p.door,
+      label: () => this.label(p),
+      icon: "house",
+      radius: 1.5,
+      blip: mine || forSale ? { ...style, label: p.label } : undefined,
+      onPressed: () => this.door(p),
+    });
+  }
+
+  /** One property changed (ownership, access, its panel record). */
+  update(id: string): void {
+    const p = content.properties.get(id);
+    if (p) this.add(p);
+    else this.doors.remove(id);
+  }
+
   rebuild(): void {
     this.doors.clear();
-    for (const p of content.properties.values()) {
-      const mine = this.access.has(p.id);
-      const blip = mine || (p.blip && owned.get(p.id) !== true);
-      this.doors.add(p.id, {
-        coords: p.door,
-        label: this.label(p),
-        icon: "house",
-        radius: 1.5,
-        blip: blip
-          ? {
-              sprite: mine ? 40 : 350,
-              color: mine ? 2 : 0,
-              scale: 0.7,
-              label: p.label,
-            }
-          : undefined,
-        onPressed: () => this.door(p),
-      });
-    }
+    for (const p of content.properties.values()) this.add(p);
   }
 
   setInside(id: string | null): void {
-    this.insideId = id;
     this.inner.clear();
     const property = id ? content.properties.get(id) : undefined;
     const interior = property
@@ -137,7 +135,7 @@ class Homes {
       if (pick === "buy") await call(EVENTS.buy, [p.id]);
       return;
     }
-    await fade(() => call(EVENTS.enter, [p.id]));
+    await move(EVENTS.enter, [p.id]);
   }
 
   async insideMenu(): Promise<void> {
@@ -148,7 +146,7 @@ class Homes {
       { id: "sell", label: Locale("PROP_SELL"), icon: "money-bill-wave" },
     ];
     const pick = await menu({ title: Locale("PROP_MENU"), items });
-    if (pick === "exit") await fade(() => call(EVENTS.exit));
+    if (pick === "exit") await move(EVENTS.exit);
     else if (pick === "stash") await call(EVENTS.stash);
     else if (pick === "keys") await this.keys();
     else if (pick === "sell") {
@@ -167,18 +165,19 @@ class Homes {
   }
 
   private async keys(): Promise<void> {
-    const result = await call(EVENTS.keys);
-    if (result.ok !== true) return;
-    const holders = (
-      Array.isArray(result.keys) ? result.keys.map(record) : []
-    ).filter((k) => typeof k.charId === "number");
+    const reply = await call(EVENTS.keys);
+    if (!reply) return;
+    const holders = (Array.isArray(reply.keys) ? reply.keys : []).filter(
+      (k): k is { charId: number; name?: unknown } =>
+        isRecord(k) && typeof k.charId === "number",
+    );
     const pick = await menu({
       title: Locale("PROP_KEYS"),
       items: [
         { id: "give", label: Locale("PROP_GIVE_KEY"), icon: "key" },
         ...holders.map((k) => ({
           id: String(k.charId),
-          label: String(k.name ?? ""),
+          label: typeof k.name === "string" ? k.name : "",
           description: Locale("PROP_TAKE_KEY"),
         })),
       ],
@@ -188,26 +187,20 @@ class Homes {
   }
 }
 
-/** Runs a move behind a short screen fade. */
-async function fade(move: () => Promise<unknown>): Promise<void> {
+/** Enter / exit: the screen goes black first; the server's `inside` event teleports and lifts the fade. */
+async function move(name: string, args: unknown[] = []): Promise<void> {
   await fadeOut();
-  await move();
-  await sleep(400);
-  DoScreenFadeIn(300);
+  if (!(await call(name, args))) DoScreenFadeIn(300);
 }
 
 const homes = new Homes();
 void homes.load();
 on(CORE.clientPlayerLoadedEvent, () => void homes.load());
-world.onChange("properties", () => {
-  content.properties = readProperties(world.get("properties"));
-  homes.rebuild();
-});
-world.onChange(
-  "interiors",
-  () => (content.interiors = readInteriors(world.get("interiors"))),
+world.onChange("properties", (key) =>
+  key === undefined ? homes.rebuild() : homes.update(key),
 );
-owned.onChange(() => homes.rebuild());
+world.onChange("settings", () => homes.rebuild());
+owned.onChange((id) => homes.update(id));
 
 onServerEvent(
   EVENTS.access,
@@ -220,11 +213,17 @@ onServerEvent(
   },
   (id, access) => homes.setAccess(id, access),
 );
+const NOWHERE: Vec4 = { x: 0, y: 0, z: 0, heading: 0 };
 onServerEvent(
   EVENTS.inside,
   {
-    args: ([id]): [string | null] | null =>
-      id == null ? [null] : typeof id === "string" ? [id] : null,
+    args: ([id, to]): [string | null, Vec4] | null =>
+      (id == null || typeof id === "string") && isRecord(to)
+        ? [id ?? null, vec4(to, NOWHERE)]
+        : null,
   },
-  (id) => homes.setInside(id),
+  (id, to) => {
+    homes.setInside(id);
+    void player.teleport(to, { heading: to.heading });
+  },
 );

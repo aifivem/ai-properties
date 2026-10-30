@@ -4,10 +4,15 @@ Houses and apartments bought at their door: a private copy of the interior per p
 
 ## Decisions
 
-- Ownership and keys live in server memory (loaded once) and the DB; the owned flag of each property is GlobalState `prop:<id>`; a player's own access is the `mine` snapshot, then `access` deltas.
-- Routing buckets 5000 + n per property (ai-core and ai-appearance use 50000+).
-- The property a character is inside is ai-core metadata `property`; at `playerLoaded` such a character is moved to the door in bucket 0.
-- Only the owner (inside the property) manages keys and sells; key holders enter and open the stash `property_<id>`.
+- Ownership and keys live in server memory (loaded once) and the DB, indexed per property and per character (a player's `mine` snapshot never walks every owned property; `mine` is rate limited to 2 per 10 s). The owned flag of each property is GlobalState `prop:<id>`, removed (not set false) on a sale; a player's own access is the `mine` snapshot, then `access` deltas.
+- A sale deletes the rows first (one transaction) and only then memory and the flag; a failed transaction refuses with `PROP_ERR_SELL` and the property stays owned.
+- Routing buckets come from lib `buckets` (ai-core's allocator): taken when the first player enters a property, given back when the last one leaves (exit, sale, drop, logout). On resource stop every player inside goes back to bucket 0 (ai-core frees the buckets); the metadata brings them to the door on the replay.
+- Moves: the server switches the bucket and sends `inside(id, to)`; the client teleports with `player.teleport` (fade, collision). Enter / exit fade out before the call, so the switch happens behind a black screen; a refusal fades back in.
+- The property a character is inside is ai-core metadata `property`; `onCharacter` `loaded` (also the replay after a restart) moves such a character to the door in bucket 0.
+- Door points: one point per property with a label function (buy / enter / locked); an ownership or access change re-adds only that property's point (its blip changes), a panel edit only the edited record, a settings edit (blip looks) all of them.
+- Blip looks of own properties and properties for sale are panel settings (`ownedBlip`, `saleBlip`); `settings` is `sync: "all"` for that (nothing secret in it).
+- Only the owner (inside the property) manages keys and sells; key holders enter and open the stash `property_<id>`. A key goes to the nearest player inside the same property (`nearestPlayerTo`).
+- Exception to "no character data in own tables": `owner_name` and the key holders' `name` are kept so the owner's key list shows offline holders without asking ai-core per row (ai-core has no offline name lookup by char id). They may go stale after a rename.
 
 ## Contracts
 

@@ -2,20 +2,31 @@ import {
   AdminPanel,
   aiLog,
   aiLogChannels,
+  buckets,
   createDatabaseTables,
   inventory,
+  isNear,
+  nearestPlayerTo,
   notify,
+  onCharacter,
   onClientCallback,
+  online,
   resourceExport,
 } from "@aicore-fivem/lib/server";
-import { asArgs, createLogger } from "@aicore-fivem/lib/shared";
-import { CORE } from "@aicore-fivem/shared";
+import {
+  createLogger,
+  fail,
+  oneArg,
+  readId,
+  readText,
+  type Vec4,
+} from "@aicore-fivem/lib/shared";
 import { Locale, ResourceName } from "common";
 import {
   EVENTS,
   INSIDE_META,
-  readInteriors,
-  readProperties,
+  readInterior,
+  readProperty,
   readSettings,
   type Property,
 } from "common/property";
@@ -25,84 +36,94 @@ import { owners, sendAccess } from "./store";
 const log = createLogger(ResourceName);
 const core = resourceExport("ai-core");
 const panel = new AdminPanel(propertiesSchema);
-/** Panel content, parsed again after every change. */
 const content = {
-  settings: readSettings(panel.get("settings")),
-  properties: readProperties(panel.get("properties")),
-  interiors: readInteriors(panel.get("interiors")),
+  settings: panel.view("settings", readSettings),
+  properties: panel.records("properties", readProperty),
+  interiors: panel.records("interiors", readInterior),
 };
-panel.onChange(
-  "settings",
-  () => (content.settings = readSettings(panel.get("settings"))),
-);
-panel.onChange(
-  "properties",
-  () => (content.properties = readProperties(panel.get("properties"))),
-);
-panel.onChange(
-  "interiors",
-  () => (content.interiors = readInteriors(panel.get("interiors"))),
-);
 aiLogChannels({ properties: {} });
 createDatabaseTables(ResourceName, "sql/main.sql")
   .then(() => owners.load())
   .catch((error: unknown) => log.error("database setup failed", error));
 
-const fail = (error: string) => ({ ok: false as const, error });
-const ped = (source: number) => GetPlayerPed(String(source));
-const near = (
-  source: number,
-  at: { x: number; y: number; z: number },
-  metres: number,
-) => {
-  const [x = 0, y = 0, z = 0] = GetEntityCoords(ped(source));
-  return Math.hypot(x - at.x, y - at.y, z - at.z) <= metres;
-};
+const charIdOf = (source: number) => online.character(source)?.id;
 const sourceOf = (charId: number) => core.GetSourceByCharId(charId);
 const nameOf = (source: number) => {
-  const c = core.GetCharacter(source);
+  const c = online.character(source);
   return c ? `${c.firstname} ${c.lastname}` : GetPlayerName(String(source));
 };
 const isPolice = (source: number) => {
-  const duty = core.GetDutyJob(source);
-  return duty !== null && content.settings.policeJobs.includes(duty);
+  const duty = online.dutyJob(source);
+  return duty !== null && content.settings.value.policeJobs.includes(duty);
 };
 
-/** Every property has its own routing bucket (5000-49999; ai-core and ai-appearance use 50000+), so each interior copy is private. */
-const buckets = new Map<string, number>();
-function bucketOf(id: string): number {
-  let bucket = buckets.get(id);
-  if (bucket === undefined) {
-    bucket = 5000 + buckets.size;
-    buckets.set(id, bucket);
-    SetRoutingBucketPopulationEnabled(bucket, false);
-    SetRoutingBucketEntityLockdownMode(bucket, "strict");
+/**
+ * Who is inside which property (server truth; also in the character's metadata for a rejoin) and the routing bucket
+ * of every occupied property (lib `buckets`: taken when the first player enters, given back when the last one leaves).
+ */
+class Interiors {
+  readonly inside = new Map<number, string>();
+  private readonly worlds = new Map<
+    string,
+    { bucket: number; count: number }
+  >();
+
+  /** Moves the player into a property (`id`) or out (null): bucket here, the teleport on the player's client. */
+  move(source: number, at: Vec4, id: string | null): void {
+    const previous = this.inside.get(source);
+    if (previous !== id) {
+      if (previous) this.leave(previous);
+      if (id) this.enter(id);
+    }
+    if (id) this.inside.set(source, id);
+    else this.inside.delete(source);
+    SetPlayerRoutingBucket(
+      String(source),
+      id ? (this.worlds.get(id)?.bucket ?? 0) : 0,
+    );
+    core.SetMeta(source, INSIDE_META, id);
+    emitNet(EVENTS.inside, source, id, at);
   }
-  return bucket;
+
+  /** The player is gone (drop, logout): the metadata stays for the rejoin. */
+  forget(source: number): void {
+    const id = this.inside.get(source);
+    if (id === undefined) return;
+    this.inside.delete(source);
+    this.leave(id);
+  }
+
+  /** Back to the shared world before the buckets go back to ai-core; the metadata moves them to the door later. */
+  stop(): void {
+    for (const source of this.inside.keys())
+      SetPlayerRoutingBucket(String(source), 0);
+  }
+
+  private enter(id: string): void {
+    const world = this.worlds.get(id);
+    if (world) world.count++;
+    else
+      this.worlds.set(id, {
+        bucket: buckets.acquire(`property:${id}`),
+        count: 1,
+      });
+  }
+
+  private leave(id: string): void {
+    const world = this.worlds.get(id);
+    if (!world || --world.count > 0) return;
+    this.worlds.delete(id);
+    buckets.release(world.bucket);
+  }
 }
 
-/** Who is inside which property (server truth; also in the character's metadata for a rejoin). */
-const inside = new Map<number, string>();
-
-function moveTo(
-  source: number,
-  at: { x: number; y: number; z: number; heading: number },
-  bucket: number,
-  id: string | null,
-): void {
-  SetPlayerRoutingBucket(String(source), bucket);
-  SetEntityCoords(ped(source), at.x, at.y, at.z, false, false, false, false);
-  SetEntityHeading(ped(source), at.heading);
-  if (id) inside.set(source, id);
-  else inside.delete(source);
-  core.SetMeta(source, INSIDE_META, id);
-  emitNet(EVENTS.inside, source, id);
-}
+const interiors = new Interiors();
+const inside = interiors.inside;
 
 /** The property the player is in, when they own it. */
 function ownedInside(source: number): Property | null {
   const id = inside.get(source);
-  const charId = core.GetCharacter(source)?.id;
+  const charId = charIdOf(source);
   const property = id ? content.properties.get(id) : undefined;
   return property &&
     charId !== undefined &&
@@ -111,26 +132,30 @@ function ownedInside(source: number): Property | null {
     : null;
 }
 
-const idArgs = ([id]: unknown[]) => asArgs(typeof id === "string" ? id : null);
+const idArgs = oneArg((v) => readText(v, 64));
 
-onClientCallback(EVENTS.mine, (source) => {
-  const charId = core.GetCharacter(source)?.id;
-  return {
-    ok: true,
-    list: charId === undefined ? [] : owners.accessList(charId),
-  };
-});
+onClientCallback(
+  EVENTS.mine,
+  (source) => {
+    const charId = charIdOf(source);
+    return {
+      ok: true,
+      list: charId === undefined ? [] : owners.accessList(charId),
+    };
+  },
+  { rate: { count: 2, windowMs: 10_000 } },
+);
 
 onClientCallback(
   EVENTS.buy,
   { args: idArgs, lock: true },
   async (source, id) => {
     const property = content.properties.get(id);
-    const charId = core.GetCharacter(source)?.id;
-    if (!property || charId === undefined || !near(source, property.door, 3))
+    const charId = charIdOf(source);
+    if (!property || charId === undefined || !isNear(source, property.door, 3))
       return fail("PROP_ERR_FAR");
     if (owners.get(id)) return fail("PROP_ERR_OWNED");
-    const account = content.settings.account;
+    const account = content.settings.value.account;
     if (!core.RemoveMoney(source, account, property.price, `property:${id}`))
       return fail("PROP_ERR_MONEY");
     if (!(await owners.buy(id, charId, nameOf(source), property.price))) {
@@ -152,21 +177,22 @@ onClientCallback(EVENTS.enter, { args: idArgs, lock: true }, (source, id) => {
   const interior = property
     ? content.interiors.get(property.interior)
     : undefined;
-  const charId = core.GetCharacter(source)?.id;
+  const charId = charIdOf(source);
   if (
     !property ||
     !interior ||
     charId === undefined ||
-    !near(source, property.door, 3)
+    !isNear(source, property.door, 3)
   )
     return fail("PROP_ERR_FAR");
-  if (GetVehiclePedIsIn(ped(source), false)) return fail("PROP_ERR_VEHICLE");
+  if (GetVehiclePedIsIn(GetPlayerPed(String(source)), false))
+    return fail("PROP_ERR_VEHICLE");
   if (
     !owners.accessOf(id, charId) &&
-    !(content.settings.policeEnter && isPolice(source) && owners.get(id))
+    !(content.settings.value.policeEnter && isPolice(source) && owners.get(id))
   )
     return fail("PROP_ERR_LOCKED");
-  moveTo(source, interior.entry, bucketOf(id), id);
+  interiors.move(source, interior.entry, id);
   return { ok: true };
 });
 
@@ -175,7 +201,7 @@ onClientCallback(
   (source) => {
     const property = content.properties.get(inside.get(source) ?? "");
     if (!property) return fail("PROP_ERR_FAR");
-    moveTo(source, property.door, 0, null);
+    interiors.move(source, property.door, null);
     return { ok: true };
   },
   { lock: true },
@@ -184,7 +210,7 @@ onClientCallback(
 onClientCallback(EVENTS.stash, (source) => {
   const id = inside.get(source);
   const property = id ? content.properties.get(id) : undefined;
-  const charId = core.GetCharacter(source)?.id;
+  const charId = charIdOf(source);
   if (
     !property ||
     charId === undefined ||
@@ -192,11 +218,12 @@ onClientCallback(EVENTS.stash, (source) => {
   )
     return fail("PROP_ERR_LOCKED");
   const name = `property_${property.id}`;
+  const settings = content.settings.value;
   inventory.registerStash(
     name,
     property.label,
-    content.settings.stashSlots,
-    content.settings.stashWeight,
+    settings.stashSlots,
+    settings.stashWeight,
   );
   return inventory.openInventory(source, name)
     ? { ok: true }
@@ -218,15 +245,13 @@ onClientCallback(
   (source) => {
     const property = ownedInside(source);
     if (!property) return fail("PROP_ERR_OWNER");
-    const [x = 0, y = 0, z = 0] = GetEntityCoords(ped(source));
-    const target = [...inside].find(
-      ([other, id]) =>
-        other !== source && id === property.id && near(other, { x, y, z }, 3),
-    )?.[0];
-    const charId =
-      target === undefined ? undefined : core.GetCharacter(target)?.id;
-    if (target === undefined || charId === undefined)
-      return fail("PROP_ERR_NOBODY");
+    const target = nearestPlayerTo(
+      source,
+      3,
+      (other) => inside.get(other) === property.id,
+    );
+    const charId = target === null ? undefined : charIdOf(target);
+    if (target === null || charId === undefined) return fail("PROP_ERR_NOBODY");
     owners.giveKey(property.id, charId, nameOf(target));
     sendAccess(sourceOf, charId, property.id, "key");
     notify(target, Locale("PROP_KEY_GOT", property.label), "success");
@@ -237,11 +262,7 @@ onClientCallback(
 
 onClientCallback(
   EVENTS.takeKey,
-  {
-    args: ([charId]) =>
-      asArgs(Number.isInteger(charId) ? Number(charId) : null),
-    lock: true,
-  },
+  { args: oneArg(readId), lock: true },
   (source, charId) => {
     const property = ownedInside(source);
     if (!property) return fail("PROP_ERR_OWNER");
@@ -256,17 +277,17 @@ onClientCallback(
   async (source) => {
     const property = ownedInside(source);
     if (!property) return fail("PROP_ERR_OWNER");
-    const refund = Math.floor(
-      (property.price * content.settings.sellPercent) / 100,
-    );
+    const settings = content.settings.value;
+    const refund = Math.floor((property.price * settings.sellPercent) / 100);
     const lost = await owners.sell(property.id);
+    if (!lost) return fail("PROP_ERR_SELL");
     for (const charId of lost) sendAccess(sourceOf, charId, property.id, false);
     for (const [other, id] of inside)
-      if (id === property.id) moveTo(other, property.door, 0, null);
+      if (id === property.id) interiors.move(other, property.door, null);
     if (refund > 0)
       core.AddMoney(
         source,
-        content.settings.account,
+        settings.account,
         refund,
         `property:${property.id}:sell`,
       );
@@ -280,11 +301,17 @@ onClientCallback(
   { lock: true },
 );
 
-/** A character that left the game inside comes back at the door, in the shared world. */
-on(CORE.playerLoadedEvent, (source: number) => {
-  const id = core.GetMeta(source, INSIDE_META);
-  const property =
-    typeof id === "string" ? content.properties.get(id) : undefined;
-  if (property) moveTo(source, property.door, 0, null);
+/** A character that left the game inside (or was inside at a restart) comes back at the door, in the shared world. */
+onCharacter({
+  loaded: (source) => {
+    const id = core.GetMeta(source, INSIDE_META);
+    const property =
+      typeof id === "string" ? content.properties.get(id) : undefined;
+    if (property) interiors.move(source, property.door, null);
+  },
+  unloaded: (source) => interiors.forget(source),
 });
-on("playerDropped", () => inside.delete(Number(globalThis.source)));
+
+on("onResourceStop", (resource: string) => {
+  if (resource === ResourceName) interiors.stop();
+});

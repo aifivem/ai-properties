@@ -2,6 +2,15 @@ import type { PanelSchema } from "@aicore-fivem/shared";
 
 const int = (min: number, max: number) =>
   ({ type: "number", min, max, integer: true }) as const;
+const blip = {
+  type: "object",
+  optional: true,
+  fields: {
+    sprite: int(0, 1000),
+    color: int(0, 100),
+    scale: { type: "number", min: 0.3, max: 2 },
+  },
+} as const;
 
 /** ai-properties' panel: properties for sale (door, interior, price), the interiors and the rules. */
 export const propertiesSchema: PanelSchema = {
@@ -10,7 +19,7 @@ export const propertiesSchema: PanelSchema = {
   files: {
     settings: {
       kind: "settings",
-      sync: "admin",
+      sync: "all",
       sections: {
         account: { type: "text", lookup: "account", min: 2, max: 32 },
         sellPercent: int(0, 100),
@@ -24,6 +33,8 @@ export const propertiesSchema: PanelSchema = {
         policeEnter: { type: "bool" },
         stashSlots: int(1, 200),
         stashWeight: int(1000, 10_000_000),
+        ownedBlip: blip,
+        saleBlip: blip,
       },
     },
     properties: {
@@ -204,6 +215,18 @@ export const propertiesSchema: PanelSchema = {
               path: "policeJobs",
               label: "ADMIN_F_POLICE_JOBS",
               placeholder: "ADMIN_P_POLICE_JOBS",
+            },
+            {
+              widget: "blip",
+              path: "ownedBlip",
+              label: "ADMIN_F_OWNED_BLIP",
+              hint: "ADMIN_H_OWNED_BLIP",
+            },
+            {
+              widget: "blip",
+              path: "saleBlip",
+              label: "ADMIN_F_SALE_BLIP",
+              hint: "ADMIN_H_SALE_BLIP",
             },
           ],
         },

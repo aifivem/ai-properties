@@ -17,11 +17,13 @@ interface Ownership {
 
 /**
  * Who owns which property and who holds keys, in memory (loaded once; rows exist only for owned properties). Each
- * change writes the DB, sets the property's GlobalState flag and sends the access delta to the online characters it
- * concerns.
+ * change writes the DB, sets the property's GlobalState flag (removed on a sale) and sends the access delta to the
+ * online characters it concerns. `byChar` indexes every access per character, so a player's snapshot never walks
+ * every owned property.
  */
 class Owners {
   private readonly byProperty = new Map<string, Ownership>();
+  private readonly byChar = new Map<number, Map<string, Access>>();
 
   async load(): Promise<void> {
     const owned = await mysql.query<
@@ -30,16 +32,36 @@ class Owners {
     const keys = await mysql.query<
       Array<{ property: string; char_id: number; name: string }>
     >("SELECT property, char_id, name FROM ai_properties_keys");
-    for (const r of owned)
+    for (const r of owned) {
+      const owner = Number(r.char_id);
       this.byProperty.set(r.property, {
-        owner: Number(r.char_id),
+        owner,
         ownerName: r.owner_name,
         keys: new Map(),
       });
-    for (const r of keys)
-      this.byProperty.get(r.property)?.keys.set(Number(r.char_id), r.name);
+      this.index(owner, r.property, "owner");
+    }
+    for (const r of keys) {
+      const o = this.byProperty.get(r.property);
+      const charId = Number(r.char_id);
+      if (!o || o.owner === charId) continue;
+      o.keys.set(charId, r.name);
+      this.index(charId, r.property, "key");
+    }
     for (const id of this.byProperty.keys()) ownedFlags.set(id, true);
     log.info(`${this.byProperty.size} owned properties loaded`);
+  }
+
+  /** Sets (or with null removes) one entry of the per-character index. */
+  private index(charId: number, id: string, access: Access | null): void {
+    let list = this.byChar.get(charId);
+    if (access === null) {
+      list?.delete(id);
+      if (list?.size === 0) this.byChar.delete(charId);
+      return;
+    }
+    if (!list) this.byChar.set(charId, (list = new Map()));
+    list.set(id, access);
   }
 
   get(id: string): Ownership | undefined {
@@ -47,19 +69,13 @@ class Owners {
   }
 
   accessOf(id: string, charId: number): Access | null {
-    const o = this.byProperty.get(id);
-    if (!o) return null;
-    return o.owner === charId ? "owner" : o.keys.has(charId) ? "key" : null;
+    return this.byChar.get(charId)?.get(id) ?? null;
   }
 
   /** Every property the character owns or holds a key to (the player's snapshot). */
   accessList(charId: number): Array<{ id: string; access: Access }> {
-    const list: Array<{ id: string; access: Access }> = [];
-    for (const [id, o] of this.byProperty) {
-      if (o.owner === charId) list.push({ id, access: "owner" });
-      else if (o.keys.has(charId)) list.push({ id, access: "key" });
-    }
-    return list;
+    const list = this.byChar.get(charId);
+    return list ? [...list].map(([id, access]) => ({ id, access })) : [];
   }
 
   async buy(
@@ -84,16 +100,20 @@ class Owners {
       log.error(`buying ${id} failed`, error);
       return false;
     }
+    this.index(charId, id, "owner");
     ownedFlags.set(id, true);
     return true;
   }
 
-  async sell(id: string): Promise<number[]> {
+  /**
+   * Deletes the ownership and its keys; answers every character that lost access, or null when the DB refused (memory
+   * and the flag stay, so the property is still owned, also after a restart). The record stays in memory during the
+   * write: nobody buys it in between.
+   */
+  async sell(id: string): Promise<number[] | null> {
     const o = this.byProperty.get(id);
-    if (!o) return [];
-    this.byProperty.delete(id);
-    ownedFlags.set(id, false);
-    await mysql.transaction([
+    if (!o) return null;
+    const done = await mysql.transaction([
       {
         query: "DELETE FROM ai_properties_keys WHERE property = ?",
         values: [id],
@@ -103,13 +123,19 @@ class Owners {
         values: [id],
       },
     ]);
-    return [o.owner, ...o.keys.keys()];
+    if (!done || this.byProperty.get(id) !== o) return null;
+    this.byProperty.delete(id);
+    const lost = [o.owner, ...o.keys.keys()];
+    for (const charId of lost) this.index(charId, id, null);
+    ownedFlags.set(id, undefined);
+    return lost;
   }
 
   giveKey(id: string, charId: number, name: string): void {
     const o = this.byProperty.get(id);
     if (!o || o.owner === charId || o.keys.has(charId)) return;
     o.keys.set(charId, name);
+    this.index(charId, id, "key");
     mysql
       .query(
         "INSERT IGNORE INTO ai_properties_keys (property, char_id, name) VALUES (?, ?, ?)",
@@ -121,6 +147,7 @@ class Owners {
   takeKey(id: string, charId: number): boolean {
     const o = this.byProperty.get(id);
     if (!o?.keys.delete(charId)) return false;
+    this.index(charId, id, null);
     mysql
       .query(
         "DELETE FROM ai_properties_keys WHERE property = ? AND char_id = ?",

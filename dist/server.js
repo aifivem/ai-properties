@@ -57,8 +57,23 @@ function vec4(value, fallback) {
 		heading: num(v.heading, fallback.heading)
 	};
 }
-// ../../../packages/lib/src/shared/records.ts
-const isObject = (value) => typeof value == "object" && !!value && !Array.isArray(value);
+// ../../../packages/lib/src/shared/strict.ts
+function readInt(value, min, max) {
+	return Number.isInteger(value) && value >= min && value <= max ? value : null;
+}
+const readId = (value) => readInt(value, 1, 2147483647);
+function readText(value, max) {
+	if (typeof value != "string") return null;
+	let text = value.trim();
+	return text ? text.slice(0, max) : null;
+}
+const oneArg = (read) => ([value]) => {
+	let parsed = read(value);
+	return parsed === null ? null : [parsed];
+}, fail = (error) => ({
+	ok: !1,
+	error
+}), isObject = (value) => typeof value == "object" && !!value && !Array.isArray(value);
 function readRecords(raw, readOne) {
 	let out = new Map();
 	if (!isObject(raw)) return out;
@@ -151,7 +166,6 @@ function formatText(template, args) {
 		return value === void 0 ? match : String(value);
 	});
 }
-const asArgs = (value) => value === null ? null : [value];
 function createLogger(resource) {
 	let prefix = `[${resource}]`;
 	return {
@@ -226,7 +240,7 @@ const CORE = {
 	clientPlayerLoadedEvent: "ai-core:client:playerLoaded",
 	clientPlayerUnloadedEvent: "ai-core:client:playerUnloaded",
 	clientCharacterPortraitEvent: "ai-core:client:characterPortrait",
-	clientCharacterLookEvent: "ai-core:client:characterLook",
+	characterLooksEvent: "ai-core:client:characterLooks",
 	clientPromptPressedEvent: "ai-core:client:promptPressed",
 	clientCacheEvent: "ai-core:client:cache",
 	clientHudVisibleEvent: "ai-core:client:hudVisible",
@@ -287,6 +301,20 @@ function loadLocaleTexts(resource = GetCurrentResourceName()) {
 }
 // ../../../packages/lib/src/fivem/callbackNames.ts
 const requestEvent = (name) => `aicore:cb:${name}`, responseEvent = (resource) => `aicore:cbr:${resource}`;
+// ../../../packages/lib/src/server/position.ts
+function entityCoords(entity) {
+	let [x = 0, y = 0, z = 0] = GetEntityCoords(entity);
+	return {
+		x,
+		y,
+		z
+	};
+}
+const coordsOf = (source) => entityCoords(GetPlayerPed(String(source)));
+function isNear(source, point, metres) {
+	let [x = 0, y = 0, z = 0] = GetEntityCoords(GetPlayerPed(String(source))), dx = x - point.x, dy = y - point.y, dz = z - point.z;
+	return dx * dx + dy * dy + dz * dz <= metres * metres;
+}
 resourceExport(CORE.resource);
 const log$7 = createLogger(GetCurrentResourceName()), gates = new Set();
 on("playerDropped", () => {
@@ -396,7 +424,7 @@ function toPatch(value) {
 		default: return null;
 	}
 }
-const clone = (value) => value === void 0 ? value : JSON.parse(JSON.stringify(value)), core$14 = resourceExport(CORE.resource), ERR = {
+const clone = (value) => value === void 0 ? value : JSON.parse(JSON.stringify(value)), core$15 = resourceExport(CORE.resource), ERR = {
 	type: "ADMIN_ERR_TYPE",
 	range: "ADMIN_ERR_RANGE",
 	length: "ADMIN_ERR_LENGTH",
@@ -410,7 +438,7 @@ const clone = (value) => value === void 0 ? value : JSON.parse(JSON.stringify(va
 		if (cached && Date.now() - cached.at < 2e3) return cached.values.size > 0 ? cached.values : null;
 		let list = [];
 		try {
-			list = core$14.GetLookupValues(source);
+			list = core$15.GetLookupValues(source);
 		} catch {}
 		let values = new Set(Array.isArray(list) ? list.filter((v) => typeof v == "string") : []);
 		return this.lists.set(source, {
@@ -613,7 +641,7 @@ function writeSchema(resource, name, text, log) {
 	(0, node_fs_promises.mkdir)(dir, { recursive: !0 }).then(() => (0, node_fs_promises.writeFile)(`${dir}/${name}.schema.json`, text, "utf8")).catch((error) => log.error(`writing ${resource}/${path} failed`, error));
 }
 // ../../../packages/lib/src/server/admin/panel.ts
-const core$13 = resourceExport(CORE.resource), DEFAULT_KEY = "^[a-z0-9_]{2,32}$";
+const core$14 = resourceExport(CORE.resource), DEFAULT_KEY = "^[a-z0-9_]{2,32}$";
 function imported(spec, value) {
 	let base = clone(spec.newRecord ?? {}), out = {};
 	for (let name of Object.keys(spec.sections)) {
@@ -637,7 +665,7 @@ var AdminPanel = class {
 	constructor(schema) {
 		this.schema = schema;
 		for (let [name, spec] of Object.entries(schema.files)) this.load(name, spec);
-		registerExport("AdminPanelSnapshot", () => this.snapshot()), registerExport("AdminPanelApply", (admin, patch) => this.apply(admin, patch)), onClientCallback(ADMIN.worldChangesCallback(this.resource), () => Object.fromEntries(this.worldChanges)), setImmediate(() => core$13.RegisterAdminPanel(this.resource));
+		registerExport("AdminPanelSnapshot", () => this.snapshot()), registerExport("AdminPanelApply", (admin, patch) => this.apply(admin, patch)), onClientCallback(ADMIN.worldChangesCallback(this.resource), () => Object.fromEntries(this.worldChanges)), setImmediate(() => core$14.RegisterAdminPanel(this.resource));
 	}
 	get(file) {
 		return this.data.get(file) ?? {};
@@ -771,7 +799,7 @@ var AdminPanel = class {
 		let spec = this.schema.files[file], data = this.get(file), value = key === void 0 ? data : data[key] ?? null;
 		this.dataFiles.get(file)?.write(data), this.views.changed(file, key, value);
 		for (let handler of this.handlers.get(file) ?? []) handler(key, value);
-		if (core$13.AdminPanelChanged({
+		if (core$14.AdminPanelChanged({
 			resource: this.resource,
 			file,
 			key,
@@ -809,19 +837,19 @@ function notify(source, text, kind = "info", duration) {
 	emitNet(CORE.clientNotifyEvent, source, notification);
 }
 // ../../../packages/lib/src/server/inventory.ts
-const core$12 = resourceExport(CORE.resource), inventory = {
-	addItem: (inv, item, count = 1, metadata, slot) => core$12.AddItem(inv, item, count, metadata, slot),
-	removeItem: (inv, item, count = 1, metadata, slot) => core$12.RemoveItem(inv, item, count, metadata, slot),
-	getItemCount: (inv, item, metadata) => core$12.GetItemCount(inv, item, metadata),
-	hasItem: (inv, item, count = 1) => core$12.HasItem(inv, item, count),
-	canCarryItem: (inv, item, count = 1, metadata) => core$12.CanCarryItem(inv, item, count, metadata),
-	getItems: (inv) => core$12.GetItems(inv),
-	clearInventory: (inv) => core$12.ClearInventory(inv),
-	registerStash: (name, label, slots, maxWeight, jobs = []) => core$12.RegisterStash(name, label, slots, maxWeight, jobs),
-	openInventory: (source, inv) => core$12.OpenInventory(source, inv),
-	registerUsableItem: (name, handler) => core$12.RegisterUsableItem(name, handler),
-	getItemDefinition: (name) => core$12.GetItemDefinition(name)
-}, core$11 = resourceExport(CORE.resource);
+const core$13 = resourceExport(CORE.resource), inventory = {
+	addItem: (inv, item, count = 1, metadata, slot) => core$13.AddItem(inv, item, count, metadata, slot),
+	removeItem: (inv, item, count = 1, metadata, slot) => core$13.RemoveItem(inv, item, count, metadata, slot),
+	getItemCount: (inv, item, metadata) => core$13.GetItemCount(inv, item, metadata),
+	hasItem: (inv, item, count = 1) => core$13.HasItem(inv, item, count),
+	canCarryItem: (inv, item, count = 1, metadata) => core$13.CanCarryItem(inv, item, count, metadata),
+	getItems: (inv) => core$13.GetItems(inv),
+	clearInventory: (inv) => core$13.ClearInventory(inv),
+	registerStash: (name, label, slots, maxWeight, jobs = []) => core$13.RegisterStash(name, label, slots, maxWeight, jobs),
+	openInventory: (source, inv) => core$13.OpenInventory(source, inv),
+	registerUsableItem: (name, handler) => core$13.RegisterUsableItem(name, handler),
+	getItemDefinition: (name) => core$13.GetItemDefinition(name)
+}, core$12 = resourceExport(CORE.resource);
 var OnlinePlayers = class {
 	players = new Map();
 	onDuty = new Map();
@@ -830,7 +858,7 @@ var OnlinePlayers = class {
 		if (this.started) return;
 		this.started = !0;
 		let load = (source, character) => {
-			this.put(source, character, (core$11.GetJobs(source) ?? []).map((m) => m.job), (core$11.GetGangs(source) ?? []).map((m) => m.gang)), this.setDuty(source, core$11.GetDutyJob(source));
+			this.put(source, character, (core$12.GetJobs(source) ?? []).map((m) => m.job), (core$12.GetGangs(source) ?? []).map((m) => m.gang)), this.setDuty(source, core$12.GetDutyJob(source));
 		};
 		on(CORE.playerLoadedEvent, load), on(CORE.playerUnloadedEvent, (source) => this.drop(source)), on(CORE.jobsChangedEvent, (source, jobs) => {
 			let player = this.players.get(source);
@@ -839,8 +867,8 @@ var OnlinePlayers = class {
 			let player = this.players.get(source);
 			player && (player.gangs = gangs.map((m) => m.gang));
 		}), on(CORE.dutyChangedEvent, (source, job) => this.setDuty(source, job));
-		for (let source of core$11.GetLoadedSources()) {
-			let character = core$11.GetCharacter(source);
+		for (let source of core$12.GetLoadedSources()) {
+			let character = core$12.GetCharacter(source);
 			character && load(source, character);
 		}
 	}
@@ -883,8 +911,57 @@ var OnlinePlayers = class {
 		return this.start(), this.onDuty.get(job) ?? EMPTY;
 	}
 };
-const EMPTY = new Set();
-new OnlinePlayers(), resourceExport(CORE.resource), resourceExport(CORE.resource), createLogger(GetCurrentResourceName());
+const EMPTY = new Set(), online = new OnlinePlayers();
+resourceExport(CORE.resource);
+// ../../../packages/lib/src/server/proximity.ts
+const core$10 = resourceExport(CORE.resource);
+function nearestPlayerTo(source, metres, filter) {
+	let from = coordsOf(source), best = null, bestDistance = metres;
+	for (let other of core$10.GetPlayersInScope(source)) {
+		if (other === source) continue;
+		let p = coordsOf(other), d = Math.hypot(p.x - from.x, p.y - from.y, p.z - from.z);
+		d > bestDistance || filter && !filter(other) || (best = other, bestDistance = d);
+	}
+	return best;
+}
+// ../../../packages/lib/src/server/players.ts
+const log$5 = createLogger(GetCurrentResourceName()), dropped = new Set();
+let listening = !1;
+function onDropped(fn) {
+	listening || (listening = !0, on("playerDropped", () => {
+		let source = Number(globalThis.source);
+		for (let handler of dropped) handler(source);
+	})), dropped.add(fn);
+}
+function onCharacter(handlers) {
+	let live = new Map(), deliver = (source, character) => {
+		if (live.set(source, character.id), handlers.loaded) try {
+			let result = handlers.loaded(source, character);
+			result instanceof Promise && result.catch((error) => log$5.error(`character loaded handler failed for ${source}`, error));
+		} catch (error) {
+			log$5.error(`character loaded handler failed for ${source}`, error);
+		}
+	}, end = (source, charId) => {
+		if (live.delete(source)) try {
+			handlers.unloaded?.(source, charId);
+		} catch (error) {
+			log$5.error(`character unloaded handler failed for ${source}`, error);
+		}
+	};
+	on(CORE.playerLoadedEvent, (source, character) => {
+		let previous = live.get(source);
+		previous !== void 0 && end(source, previous), deliver(source, character);
+	}), on(CORE.playerUnloadedEvent, (source, charId) => end(source, charId)), onDropped((source) => setImmediate(() => {
+		let charId = live.get(source);
+		charId !== void 0 && end(source, charId);
+	})), setImmediate(() => {
+		for (let source of online.sources()) {
+			if (live.has(source)) continue;
+			let character = online.character(source);
+			character && deliver(source, character);
+		}
+	});
+}
 // ../../../packages/lib/src/server/command.ts
 const resource$3 = GetCurrentResourceName();
 createLogger(resource$3), new class {
@@ -15265,7 +15342,13 @@ var GlobalGroup$1 = class extends Mirror {
 		GlobalState.set(this.prefix + id, value ?? null, !0), this.put(id, value);
 	}
 };
-resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource);
+resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource);
+// ../../../packages/lib/src/server/buckets.ts
+const core$5 = resourceExport(CORE.resource), buckets = {
+	acquire: (tag) => core$5.AcquireBucket(tag),
+	release: (id) => core$5.ReleaseBucket(id)
+};
+resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource), resourceExport(CORE.resource);
 // resource/common/locale.ts
 const Locale = createLocale(), ResourceName = GetCurrentResourceName();
 IsDuplicityVersion();
@@ -15283,6 +15366,14 @@ const EVENTS = {
 	sell: "ai-properties:sell",
 	inside: "ai-properties:client:inside"
 }, INSIDE_META = "property";
+function readBlip(raw, fallback) {
+	let v = record(raw);
+	return {
+		sprite: int$1(v.sprite, fallback.sprite, 0, 1e3),
+		color: int$1(v.color, fallback.color, 0, 100),
+		scale: num(v.scale, fallback.scale, .3, 2)
+	};
+}
 function readSettings(raw) {
 	let v = record(raw), jobs = Array.isArray(v.policeJobs) ? v.policeJobs.filter((j) => typeof j == "string") : [];
 	return {
@@ -15291,7 +15382,17 @@ function readSettings(raw) {
 		policeJobs: jobs.length > 0 ? jobs : ["police"],
 		policeEnter: bool(v.policeEnter, !0),
 		stashSlots: int$1(v.stashSlots, 40, 1, 200),
-		stashWeight: int$1(v.stashWeight, 15e4, 1e3, 1e7)
+		stashWeight: int$1(v.stashWeight, 15e4, 1e3, 1e7),
+		ownedBlip: readBlip(v.ownedBlip, {
+			sprite: 40,
+			color: 2,
+			scale: .7
+		}),
+		saleBlip: readBlip(v.saleBlip, {
+			sprite: 350,
+			color: 0,
+			scale: .7
+		})
 	};
 }
 const ZERO = {
@@ -15300,32 +15401,22 @@ const ZERO = {
 	z: 0,
 	heading: 0
 };
-function readInteriors(raw) {
-	let out = new Map();
-	for (let [id, value] of Object.entries(record(raw))) {
-		let v = record(value);
-		out.set(id, {
-			id,
-			label: str(v.label, id, 48),
-			entry: vec4(v.entry, ZERO)
-		});
-	}
-	return out;
+function readInterior(id, v) {
+	return {
+		id,
+		label: str(v.label, id, 48),
+		entry: vec4(v.entry, ZERO)
+	};
 }
-function readProperties(raw) {
-	let out = new Map();
-	for (let [id, value] of Object.entries(record(raw))) {
-		let v = record(value);
-		out.set(id, {
-			id,
-			label: str(v.label, id, 48),
-			door: vec4(v.door, ZERO),
-			interior: str(v.interior, "low", 48),
-			price: int$1(v.price, 0, 0),
-			blip: bool(v.blip, !1)
-		});
-	}
-	return out;
+function readProperty(id, v) {
+	return {
+		id,
+		label: str(v.label, id, 48),
+		door: vec4(v.door, ZERO),
+		interior: str(v.interior, "low", 48),
+		price: int$1(v.price, 0, 0),
+		blip: bool(v.blip, !1)
+	};
 }
 // resource/server/schema.ts
 const int = (min, max) => ({
@@ -15333,13 +15424,25 @@ const int = (min, max) => ({
 	min,
 	max,
 	integer: !0
-}), propertiesSchema = {
+}), blip = {
+	type: "object",
+	optional: !0,
+	fields: {
+		sprite: int(0, 1e3),
+		color: int(0, 100),
+		scale: {
+			type: "number",
+			min: .3,
+			max: 2
+		}
+	}
+}, propertiesSchema = {
 	title: "ADMIN_TITLE",
 	icon: "building-columns",
 	files: {
 		settings: {
 			kind: "settings",
-			sync: "admin",
+			sync: "all",
 			sections: {
 				account: {
 					type: "text",
@@ -15357,7 +15460,9 @@ const int = (min, max) => ({
 				},
 				policeEnter: { type: "bool" },
 				stashSlots: int(1, 200),
-				stashWeight: int(1e3, 1e7)
+				stashWeight: int(1e3, 1e7),
+				ownedBlip: blip,
+				saleBlip: blip
 			}
 		},
 		properties: {
@@ -15555,6 +15660,18 @@ const int = (min, max) => ({
 						path: "policeJobs",
 						label: "ADMIN_F_POLICE_JOBS",
 						placeholder: "ADMIN_P_POLICE_JOBS"
+					},
+					{
+						widget: "blip",
+						path: "ownedBlip",
+						label: "ADMIN_F_OWNED_BLIP",
+						hint: "ADMIN_H_OWNED_BLIP"
+					},
+					{
+						widget: "blip",
+						path: "saleBlip",
+						label: "ADMIN_F_SALE_BLIP",
+						hint: "ADMIN_H_SALE_BLIP"
 					}
 				]
 			}]
@@ -15562,34 +15679,40 @@ const int = (min, max) => ({
 	]
 }, ownedFlags = new GlobalGroup("prop:", stateBoolean), log$1 = createLogger(ResourceName), owners = new class {
 	byProperty = new Map();
+	byChar = new Map();
 	async load() {
 		let owned = await mysql.query("SELECT property, char_id, owner_name FROM ai_properties_owned"), keys = await mysql.query("SELECT property, char_id, name FROM ai_properties_keys");
-		for (let r of owned) this.byProperty.set(r.property, {
-			owner: Number(r.char_id),
-			ownerName: r.owner_name,
-			keys: new Map()
-		});
-		for (let r of keys) this.byProperty.get(r.property)?.keys.set(Number(r.char_id), r.name);
+		for (let r of owned) {
+			let owner = Number(r.char_id);
+			this.byProperty.set(r.property, {
+				owner,
+				ownerName: r.owner_name,
+				keys: new Map()
+			}), this.index(owner, r.property, "owner");
+		}
+		for (let r of keys) {
+			let o = this.byProperty.get(r.property), charId = Number(r.char_id);
+			o && o.owner !== charId && (o.keys.set(charId, r.name), this.index(charId, r.property, "key"));
+		}
 		for (let id of this.byProperty.keys()) ownedFlags.set(id, !0);
 		log$1.info(`${this.byProperty.size} owned properties loaded`);
+	}
+	index(charId, id, access) {
+		let list = this.byChar.get(charId);
+		access === null ? (list?.delete(id), list?.size === 0 && this.byChar.delete(charId)) : (list || this.byChar.set(charId, list = new Map()), list.set(id, access));
 	}
 	get(id) {
 		return this.byProperty.get(id);
 	}
 	accessOf(id, charId) {
-		let o = this.byProperty.get(id);
-		return o ? o.owner === charId ? "owner" : o.keys.has(charId) ? "key" : null : null;
+		return this.byChar.get(charId)?.get(id) ?? null;
 	}
 	accessList(charId) {
-		let list = [];
-		for (let [id, o] of this.byProperty) o.owner === charId ? list.push({
+		let list = this.byChar.get(charId);
+		return list ? [...list].map(([id, access]) => ({
 			id,
-			access: "owner"
-		}) : o.keys.has(charId) && list.push({
-			id,
-			access: "key"
-		});
-		return list;
+			access
+		})) : [];
 	}
 	async buy(id, charId, name, price) {
 		if (this.byProperty.has(id)) return !1;
@@ -15608,28 +15731,32 @@ const int = (min, max) => ({
 		} catch (error) {
 			return this.byProperty.delete(id), log$1.error(`buying ${id} failed`, error), !1;
 		}
-		return ownedFlags.set(id, !0), !0;
+		return this.index(charId, id, "owner"), ownedFlags.set(id, !0), !0;
 	}
 	async sell(id) {
 		let o = this.byProperty.get(id);
-		return o ? (this.byProperty.delete(id), ownedFlags.set(id, !1), await mysql.transaction([{
+		if (!o || !await mysql.transaction([{
 			query: "DELETE FROM ai_properties_keys WHERE property = ?",
 			values: [id]
 		}, {
 			query: "DELETE FROM ai_properties_owned WHERE property = ?",
 			values: [id]
-		}]), [o.owner, ...o.keys.keys()]) : [];
+		}]) || this.byProperty.get(id) !== o) return null;
+		this.byProperty.delete(id);
+		let lost = [o.owner, ...o.keys.keys()];
+		for (let charId of lost) this.index(charId, id, null);
+		return ownedFlags.set(id, void 0), lost;
 	}
 	giveKey(id, charId, name) {
 		let o = this.byProperty.get(id);
-		o && o.owner !== charId && !o.keys.has(charId) && (o.keys.set(charId, name), mysql.query("INSERT IGNORE INTO ai_properties_keys (property, char_id, name) VALUES (?, ?, ?)", [
+		o && o.owner !== charId && !o.keys.has(charId) && (o.keys.set(charId, name), this.index(charId, id, "key"), mysql.query("INSERT IGNORE INTO ai_properties_keys (property, char_id, name) VALUES (?, ?, ?)", [
 			id,
 			charId,
 			name.slice(0, 64)
 		]).catch((error) => log$1.error("key save failed", error)));
 	}
 	takeKey(id, charId) {
-		return this.byProperty.get(id)?.keys.delete(charId) ? (mysql.query("DELETE FROM ai_properties_keys WHERE property = ? AND char_id = ?", [id, charId]).catch((error) => log$1.error("key delete failed", error)), !0) : !1;
+		return this.byProperty.get(id)?.keys.delete(charId) ? (this.index(charId, id, null), mysql.query("DELETE FROM ai_properties_keys WHERE property = ? AND char_id = ?", [id, charId]).catch((error) => log$1.error("key delete failed", error)), !0) : !1;
 	}
 }();
 function sendAccess(sourceOf, charId, id, access) {
@@ -15638,51 +15765,65 @@ function sendAccess(sourceOf, charId, id, access) {
 }
 // resource/server/index.ts
 const log = createLogger(ResourceName), core = resourceExport("ai-core"), panel = new AdminPanel(propertiesSchema), content = {
-	settings: readSettings(panel.get("settings")),
-	properties: readProperties(panel.get("properties")),
-	interiors: readInteriors(panel.get("interiors"))
+	settings: panel.view("settings", readSettings),
+	properties: panel.records("properties", readProperty),
+	interiors: panel.records("interiors", readInterior)
 };
-panel.onChange("settings", () => content.settings = readSettings(panel.get("settings"))), panel.onChange("properties", () => content.properties = readProperties(panel.get("properties"))), panel.onChange("interiors", () => content.interiors = readInteriors(panel.get("interiors"))), aiLogChannels({ properties: {} }), createDatabaseTables(ResourceName, "sql/main.sql").then(() => owners.load()).catch((error) => log.error("database setup failed", error));
-const fail = (error) => ({
-	ok: !1,
-	error
-}), ped = (source) => GetPlayerPed(String(source)), near = (source, at, metres) => {
-	let [x = 0, y = 0, z = 0] = GetEntityCoords(ped(source));
-	return Math.hypot(x - at.x, y - at.y, z - at.z) <= metres;
-}, sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => {
-	let c = core.GetCharacter(source);
+aiLogChannels({ properties: {} }), createDatabaseTables(ResourceName, "sql/main.sql").then(() => owners.load()).catch((error) => log.error("database setup failed", error));
+const charIdOf = (source) => online.character(source)?.id, sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => {
+	let c = online.character(source);
 	return c ? `${c.firstname} ${c.lastname}` : GetPlayerName(String(source));
 }, isPolice = (source) => {
-	let duty = core.GetDutyJob(source);
-	return duty !== null && content.settings.policeJobs.includes(duty);
-}, buckets = new Map();
-function bucketOf(id) {
-	let bucket = buckets.get(id);
-	return bucket === void 0 && (bucket = 5e3 + buckets.size, buckets.set(id, bucket), SetRoutingBucketPopulationEnabled(bucket, !1), SetRoutingBucketEntityLockdownMode(bucket, "strict")), bucket;
-}
-const inside = new Map();
-function moveTo(source, at, bucket, id) {
-	SetPlayerRoutingBucket(String(source), bucket), SetEntityCoords(ped(source), at.x, at.y, at.z, !1, !1, !1, !1), SetEntityHeading(ped(source), at.heading), id ? inside.set(source, id) : inside.delete(source), core.SetMeta(source, INSIDE_META, id), emitNet(EVENTS.inside, source, id);
-}
+	let duty = online.dutyJob(source);
+	return duty !== null && content.settings.value.policeJobs.includes(duty);
+}, interiors = new class {
+	inside = new Map();
+	worlds = new Map();
+	move(source, at, id) {
+		let previous = this.inside.get(source);
+		previous !== id && (previous && this.leave(previous), id && this.enter(id)), id ? this.inside.set(source, id) : this.inside.delete(source), SetPlayerRoutingBucket(String(source), id ? this.worlds.get(id)?.bucket ?? 0 : 0), core.SetMeta(source, INSIDE_META, id), emitNet(EVENTS.inside, source, id, at);
+	}
+	forget(source) {
+		let id = this.inside.get(source);
+		id !== void 0 && (this.inside.delete(source), this.leave(id));
+	}
+	stop() {
+		for (let source of this.inside.keys()) SetPlayerRoutingBucket(String(source), 0);
+	}
+	enter(id) {
+		let world = this.worlds.get(id);
+		world ? world.count++ : this.worlds.set(id, {
+			bucket: buckets.acquire(`property:${id}`),
+			count: 1
+		});
+	}
+	leave(id) {
+		let world = this.worlds.get(id);
+		!world || --world.count > 0 || (this.worlds.delete(id), buckets.release(world.bucket));
+	}
+}(), inside = interiors.inside;
 function ownedInside(source) {
-	let id = inside.get(source), charId = core.GetCharacter(source)?.id, property = id ? content.properties.get(id) : void 0;
+	let id = inside.get(source), charId = charIdOf(source), property = id ? content.properties.get(id) : void 0;
 	return property && charId !== void 0 && owners.accessOf(property.id, charId) === "owner" ? property : null;
 }
-const idArgs = ([id]) => asArgs(typeof id == "string" ? id : null);
+const idArgs = oneArg((v) => readText(v, 64));
 onClientCallback(EVENTS.mine, (source) => {
-	let charId = core.GetCharacter(source)?.id;
+	let charId = charIdOf(source);
 	return {
 		ok: !0,
 		list: charId === void 0 ? [] : owners.accessList(charId)
 	};
-}), onClientCallback(EVENTS.buy, {
+}, { rate: {
+	count: 2,
+	windowMs: 1e4
+} }), onClientCallback(EVENTS.buy, {
 	args: idArgs,
 	lock: !0
 }, async (source, id) => {
-	let property = content.properties.get(id), charId = core.GetCharacter(source)?.id;
-	if (!property || charId === void 0 || !near(source, property.door, 3)) return fail("PROP_ERR_FAR");
+	let property = content.properties.get(id), charId = charIdOf(source);
+	if (!property || charId === void 0 || !isNear(source, property.door, 3)) return fail("PROP_ERR_FAR");
 	if (owners.get(id)) return fail("PROP_ERR_OWNED");
-	let account = content.settings.account;
+	let account = content.settings.value.account;
 	return core.RemoveMoney(source, account, property.price, `property:${id}`) ? await owners.buy(id, charId, nameOf(source), property.price) ? (sendAccess(sourceOf, charId, id, "owner"), notify(source, Locale("PROP_BOUGHT", property.label), "success"), aiLog("properties", `bought ${id}`, {
 		source,
 		metadata: { price: property.price }
@@ -15691,16 +15832,16 @@ onClientCallback(EVENTS.mine, (source) => {
 	args: idArgs,
 	lock: !0
 }, (source, id) => {
-	let property = content.properties.get(id), interior = property ? content.interiors.get(property.interior) : void 0, charId = core.GetCharacter(source)?.id;
-	return !property || !interior || charId === void 0 || !near(source, property.door, 3) ? fail("PROP_ERR_FAR") : GetVehiclePedIsIn(ped(source), !1) ? fail("PROP_ERR_VEHICLE") : !owners.accessOf(id, charId) && !(content.settings.policeEnter && isPolice(source) && owners.get(id)) ? fail("PROP_ERR_LOCKED") : (moveTo(source, interior.entry, bucketOf(id), id), { ok: !0 });
+	let property = content.properties.get(id), interior = property ? content.interiors.get(property.interior) : void 0, charId = charIdOf(source);
+	return !property || !interior || charId === void 0 || !isNear(source, property.door, 3) ? fail("PROP_ERR_FAR") : GetVehiclePedIsIn(GetPlayerPed(String(source)), !1) ? fail("PROP_ERR_VEHICLE") : !owners.accessOf(id, charId) && !(content.settings.value.policeEnter && isPolice(source) && owners.get(id)) ? fail("PROP_ERR_LOCKED") : (interiors.move(source, interior.entry, id), { ok: !0 });
 }), onClientCallback(EVENTS.exit, (source) => {
 	let property = content.properties.get(inside.get(source) ?? "");
-	return property ? (moveTo(source, property.door, 0, null), { ok: !0 }) : fail("PROP_ERR_FAR");
+	return property ? (interiors.move(source, property.door, null), { ok: !0 }) : fail("PROP_ERR_FAR");
 }, { lock: !0 }), onClientCallback(EVENTS.stash, (source) => {
-	let id = inside.get(source), property = id ? content.properties.get(id) : void 0, charId = core.GetCharacter(source)?.id;
+	let id = inside.get(source), property = id ? content.properties.get(id) : void 0, charId = charIdOf(source);
 	if (!property || charId === void 0 || !owners.accessOf(property.id, charId)) return fail("PROP_ERR_LOCKED");
-	let name = `property_${property.id}`;
-	return inventory.registerStash(name, property.label, content.settings.stashSlots, content.settings.stashWeight), inventory.openInventory(source, name) ? { ok: !0 } : fail("PROP_ERR_FAR");
+	let name = `property_${property.id}`, settings = content.settings.value;
+	return inventory.registerStash(name, property.label, settings.stashSlots, settings.stashWeight), inventory.openInventory(source, name) ? { ok: !0 } : fail("PROP_ERR_FAR");
 }), onClientCallback(EVENTS.keys, (source) => {
 	let property = ownedInside(source);
 	return property ? {
@@ -15713,14 +15854,10 @@ onClientCallback(EVENTS.mine, (source) => {
 }), onClientCallback(EVENTS.giveKey, (source) => {
 	let property = ownedInside(source);
 	if (!property) return fail("PROP_ERR_OWNER");
-	let [x = 0, y = 0, z = 0] = GetEntityCoords(ped(source)), target = [...inside].find(([other, id]) => other !== source && id === property.id && near(other, {
-		x,
-		y,
-		z
-	}, 3))?.[0], charId = target === void 0 ? void 0 : core.GetCharacter(target)?.id;
-	return target === void 0 || charId === void 0 ? fail("PROP_ERR_NOBODY") : (owners.giveKey(property.id, charId, nameOf(target)), sendAccess(sourceOf, charId, property.id, "key"), notify(target, Locale("PROP_KEY_GOT", property.label), "success"), { ok: !0 });
+	let target = nearestPlayerTo(source, 3, (other) => inside.get(other) === property.id), charId = target === null ? void 0 : charIdOf(target);
+	return target === null || charId === void 0 ? fail("PROP_ERR_NOBODY") : (owners.giveKey(property.id, charId, nameOf(target)), sendAccess(sourceOf, charId, property.id, "key"), notify(target, Locale("PROP_KEY_GOT", property.label), "success"), { ok: !0 });
 }, { lock: !0 }), onClientCallback(EVENTS.takeKey, {
-	args: ([charId]) => asArgs(Number.isInteger(charId) ? Number(charId) : null),
+	args: oneArg(readId),
 	lock: !0
 }, (source, charId) => {
 	let property = ownedInside(source);
@@ -15728,14 +15865,20 @@ onClientCallback(EVENTS.mine, (source) => {
 }), onClientCallback(EVENTS.sell, async (source) => {
 	let property = ownedInside(source);
 	if (!property) return fail("PROP_ERR_OWNER");
-	let refund = Math.floor(property.price * content.settings.sellPercent / 100), lost = await owners.sell(property.id);
+	let settings = content.settings.value, refund = Math.floor(property.price * settings.sellPercent / 100), lost = await owners.sell(property.id);
+	if (!lost) return fail("PROP_ERR_SELL");
 	for (let charId of lost) sendAccess(sourceOf, charId, property.id, !1);
-	for (let [other, id] of inside) id === property.id && moveTo(other, property.door, 0, null);
-	return refund > 0 && core.AddMoney(source, content.settings.account, refund, `property:${property.id}:sell`), notify(source, Locale("PROP_SOLD", property.label, refund), "success"), aiLog("properties", `sold ${property.id}`, {
+	for (let [other, id] of inside) id === property.id && interiors.move(other, property.door, null);
+	return refund > 0 && core.AddMoney(source, settings.account, refund, `property:${property.id}:sell`), notify(source, Locale("PROP_SOLD", property.label, refund), "success"), aiLog("properties", `sold ${property.id}`, {
 		source,
 		metadata: { refund }
 	}), { ok: !0 };
-}, { lock: !0 }), on(CORE.playerLoadedEvent, (source) => {
-	let id = core.GetMeta(source, INSIDE_META), property = typeof id == "string" ? content.properties.get(id) : void 0;
-	property && moveTo(source, property.door, 0, null);
-}), on("playerDropped", () => inside.delete(Number(globalThis.source)));
+}, { lock: !0 }), onCharacter({
+	loaded: (source) => {
+		let id = core.GetMeta(source, INSIDE_META), property = typeof id == "string" ? content.properties.get(id) : void 0;
+		property && interiors.move(source, property.door, null);
+	},
+	unloaded: (source) => interiors.forget(source)
+}), on("onResourceStop", (resource) => {
+	resource === ResourceName && interiors.stop();
+});
