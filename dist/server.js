@@ -295,6 +295,8 @@ const CORE = {
 	vehicleTypeCallback: "ai-core:vehicleType",
 	interactionStateKey: "ai:interaction",
 	pvpStateKey: "ai:pvp",
+	medicalStateKey: "ai:medical",
+	clientDeadEvent: "ai-core:client:dead",
 	charactersCallback: "ai-core:characters",
 	createCharacterCallback: "ai-core:createCharacter",
 	deleteCharacterCallback: "ai-core:deleteCharacter",
@@ -370,6 +372,10 @@ function entityCoords(entity) {
 	};
 }
 const coordsOf = (source) => entityCoords(GetPlayerPed(String(source)));
+function vehicleOf(source, options = {}) {
+	let ped = GetPlayerPed(String(source)), vehicle = GetVehiclePedIsIn(ped, !1);
+	return !vehicle || !options.driver || GetPedInVehicleSeat(vehicle, -1) === ped ? vehicle : 0;
+}
 function isNear(source, point, metres) {
 	let [x = 0, y = 0, z = 0] = GetEntityCoords(GetPlayerPed(String(source))), dx = x - point.x, dy = y - point.y, dz = z - point.z;
 	return dx * dx + dy * dy + dz * dz <= metres * metres;
@@ -1026,6 +1032,9 @@ var OnlinePlayers = class {
 	character(source) {
 		return this.start(), this.players.get(source)?.character ?? null;
 	}
+	charId(source) {
+		return this.start(), this.players.get(source)?.character.id;
+	}
 	name(source, options = {}) {
 		let c = this.character(source);
 		return c ? `${c.firstname} ${c.lastname}` : options.fallback === !1 ? "" : GetPlayerName(String(source));
@@ -1094,9 +1103,9 @@ function nearestPlayerTo(source, metres, filter) {
 }
 // ../../../packages/lib/src/server/players.ts
 const log$5 = createLogger(GetCurrentResourceName()), dropped = new Set();
-let listening = !1;
+let listening$1 = !1;
 function onDropped(fn) {
-	listening || (listening = !0, on("playerDropped", () => {
+	listening$1 || (listening$1 = !0, on("playerDropped", () => {
 		let source = Number(globalThis.source);
 		for (let handler of dropped) handler(source);
 	})), dropped.add(fn);
@@ -1118,19 +1127,19 @@ function onCharacter(handlers) {
 		} catch (error) {
 			log$5.error(`character loaded handler failed for ${source}`, error);
 		}
-	}, end = (source, charId) => {
+	}, end = (source, charId, reason) => {
 		if (live.delete(source)) try {
-			handlers.unloaded?.(source, charId);
+			handlers.unloaded?.(source, charId, reason);
 		} catch (error) {
 			log$5.error(`character unloaded handler failed for ${source}`, error);
 		}
 	};
 	on(CORE.playerLoadedEvent, (source, character) => {
 		let previous = live.get(source);
-		previous !== void 0 && end(source, previous), deliver(source, character);
-	}), on(CORE.playerUnloadedEvent, (source, charId) => end(source, charId)), onDropped((source) => setImmediate(() => {
+		previous !== void 0 && end(source, previous, "switch"), deliver(source, character);
+	}), on(CORE.playerUnloadedEvent, (source, charId, reason) => end(source, charId, reason === "dropped" ? "dropped" : "switch")), onDropped((source) => setImmediate(() => {
 		let charId = live.get(source);
-		charId !== void 0 && end(source, charId);
+		charId !== void 0 && end(source, charId, "dropped");
 	})), setImmediate(() => {
 		for (let source of online.sources()) {
 			if (live.has(source)) continue;
@@ -15489,6 +15498,23 @@ async function createDatabaseTables(resource, file) {
 		else for (let [name, definition] of statement.columns) columns.has(name) || (await mysql.query(`ALTER TABLE \`${statement.table}\` ADD COLUMN ${definition}`), log$2.info(`^2added column ${statement.table}.${name}^7 (${resource})`));
 	}
 }
+// ../../../packages/lib/src/fivem/byResource.ts
+const stopHandlers = [];
+let listening = !1;
+function onAnyStop(handler) {
+	if (stopHandlers.push(handler), listening) return;
+	listening = !0;
+	let event = IsDuplicityVersion() ? "onResourceStop" : "onClientResourceStop";
+	on(event, (resource) => {
+		for (let stop of stopHandlers) stop(resource);
+	});
+}
+function onStop(fn) {
+	let self = GetCurrentResourceName();
+	onAnyStop((resource) => {
+		resource === self && fn();
+	});
+}
 // ../../../packages/lib/src/fivem/scheduler.ts
 var Group = class {
 	interval;
@@ -15656,13 +15682,6 @@ const EVENTS = {
 	sell: "ai-properties:sell",
 	inside: "ai-properties:client:inside"
 }, INSIDE_META = "property";
-function readBlip(raw, fallback) {
-	return readBlipStyle(record(raw), {
-		sprite: fallback.sprite,
-		color: fallback.color,
-		scale: fallback.scale
-	});
-}
 function readSettings(raw) {
 	let v = record(raw), jobs = Array.isArray(v.policeJobs) ? v.policeJobs.filter((j) => typeof j == "string") : [];
 	return {
@@ -15672,12 +15691,12 @@ function readSettings(raw) {
 		policeEnter: bool(v.policeEnter, !0),
 		stashSlots: int(v.stashSlots, 40, 1, 200),
 		stashWeight: int(v.stashWeight, 15e4, 1e3, 1e7),
-		ownedBlip: readBlip(v.ownedBlip, {
+		ownedBlip: readBlipStyle(v.ownedBlip, {
 			sprite: 40,
 			color: 2,
 			scale: .7
 		}),
-		saleBlip: readBlip(v.saleBlip, {
+		saleBlip: readBlipStyle(v.saleBlip, {
 			sprite: 350,
 			color: 0,
 			scale: .7
@@ -16047,7 +16066,7 @@ const log = createLogger(ResourceName), core = resourceExport("ai-core"), panel 
 	interiors: panel.records("interiors", readInterior)
 };
 aiLogChannels({ properties: {} }), createDatabaseTables(ResourceName, "sql/main.sql").then(() => owners.load()).catch((error) => log.error("database setup failed", error));
-const charIdOf = (source) => online.character(source)?.id, sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => online.name(source), isPolice = (source) => online.onDutyIn(source, content.settings.value.policeJobs), interiors = new class {
+const sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => online.name(source), isPolice = (source) => online.onDutyIn(source, content.settings.value.policeJobs), interiors = new class {
 	inside = new Map();
 	worlds = new Map();
 	move(source, at, id) {
@@ -16074,12 +16093,12 @@ const charIdOf = (source) => online.character(source)?.id, sourceOf = (charId) =
 	}
 }(), inside = interiors.inside;
 function ownedInside(source) {
-	let id = inside.get(source), charId = charIdOf(source), property = id ? content.properties.get(id) : void 0;
+	let id = inside.get(source), charId = online.charId(source), property = id ? content.properties.get(id) : void 0;
 	return property && charId !== void 0 && owners.accessOf(property.id, charId) === "owner" ? property : null;
 }
 const idArgs = oneArg((v) => readText(v, 64));
 onClientCallback(EVENTS.mine, (source) => {
-	let charId = charIdOf(source);
+	let charId = online.charId(source);
 	return {
 		ok: !0,
 		list: charId === void 0 ? [] : owners.accessList(charId)
@@ -16091,7 +16110,7 @@ onClientCallback(EVENTS.mine, (source) => {
 	args: idArgs,
 	lock: !0
 }, async (source, id) => {
-	let property = content.properties.get(id), charId = charIdOf(source);
+	let property = content.properties.get(id), charId = online.charId(source);
 	if (!property || charId === void 0 || !isNear(source, property.door, 3)) return fail("PROP_ERR_FAR");
 	if (owners.get(id)) return fail("PROP_ERR_OWNED");
 	let account = content.settings.value.account;
@@ -16103,13 +16122,13 @@ onClientCallback(EVENTS.mine, (source) => {
 	args: idArgs,
 	lock: !0
 }, (source, id) => {
-	let property = content.properties.get(id), interior = property ? content.interiors.get(property.interior) : void 0, charId = charIdOf(source);
-	return !property || !interior || charId === void 0 || !isNear(source, property.door, 3) ? fail("PROP_ERR_FAR") : GetVehiclePedIsIn(GetPlayerPed(String(source)), !1) ? fail("PROP_ERR_VEHICLE") : !owners.accessOf(id, charId) && !(content.settings.value.policeEnter && isPolice(source) && owners.get(id)) ? fail("PROP_ERR_LOCKED") : (interiors.move(source, interior.entry, id), { ok: !0 });
+	let property = content.properties.get(id), interior = property ? content.interiors.get(property.interior) : void 0, charId = online.charId(source);
+	return !property || !interior || charId === void 0 || !isNear(source, property.door, 3) ? fail("PROP_ERR_FAR") : vehicleOf(source) ? fail("PROP_ERR_VEHICLE") : !owners.accessOf(id, charId) && !(content.settings.value.policeEnter && isPolice(source) && owners.get(id)) ? fail("PROP_ERR_LOCKED") : (interiors.move(source, interior.entry, id), { ok: !0 });
 }), onClientCallback(EVENTS.exit, (source) => {
 	let property = content.properties.get(inside.get(source) ?? "");
 	return property ? (interiors.move(source, property.door, null), { ok: !0 }) : fail("PROP_ERR_FAR");
 }, { lock: !0 }), onClientCallback(EVENTS.stash, (source) => {
-	let id = inside.get(source), property = id ? content.properties.get(id) : void 0, charId = charIdOf(source);
+	let id = inside.get(source), property = id ? content.properties.get(id) : void 0, charId = online.charId(source);
 	if (!property || charId === void 0 || !owners.accessOf(property.id, charId)) return fail("PROP_ERR_LOCKED");
 	let owner = owners.get(property.id)?.owner;
 	if (owner === void 0) return fail("PROP_ERR_LOCKED");
@@ -16127,7 +16146,7 @@ onClientCallback(EVENTS.mine, (source) => {
 }), onClientCallback(EVENTS.giveKey, (source) => {
 	let property = ownedInside(source);
 	if (!property) return fail("PROP_ERR_OWNER");
-	let target = nearestPlayerTo(source, 3, (other) => inside.get(other) === property.id), charId = target === null ? void 0 : charIdOf(target);
+	let target = nearestPlayerTo(source, 3, (other) => inside.get(other) === property.id), charId = target === null ? void 0 : online.charId(target);
 	return target === null || charId === void 0 ? fail("PROP_ERR_NOBODY") : (owners.giveKey(property.id, charId, nameOf(target)), sendAccess(sourceOf, charId, property.id, "key"), notify(target, Locale("PROP_KEY_GOT", property.label), "success"), { ok: !0 });
 }, { lock: !0 }), onClientCallback(EVENTS.takeKey, {
 	args: oneArg(readId),
@@ -16152,6 +16171,4 @@ onClientCallback(EVENTS.mine, (source) => {
 		property && interiors.move(source, property.door, null);
 	},
 	unloaded: (source) => interiors.forget(source)
-}), on("onResourceStop", (resource) => {
-	resource === ResourceName && interiors.stop();
-});
+}), onStop(() => interiors.stop());

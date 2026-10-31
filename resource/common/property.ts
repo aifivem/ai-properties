@@ -62,11 +62,6 @@ export interface BlipStyle {
   scale: number;
 }
 
-function readBlip(raw: unknown, fallback: BlipStyle): BlipStyle {
-  const v = record(raw);
-  return readBlipStyle(v, { sprite: fallback.sprite, color: fallback.color, scale: fallback.scale });
-}
-
 export function readSettings(raw: unknown): Settings {
   const v = record(raw);
   const jobs = Array.isArray(v.policeJobs)
@@ -79,8 +74,8 @@ export function readSettings(raw: unknown): Settings {
     policeEnter: bool(v.policeEnter, true),
     stashSlots: int(v.stashSlots, 40, 1, 200),
     stashWeight: int(v.stashWeight, 150_000, 1000, 10_000_000),
-    ownedBlip: readBlip(v.ownedBlip, { sprite: 40, color: 2, scale: 0.7 }),
-    saleBlip: readBlip(v.saleBlip, { sprite: 350, color: 0, scale: 0.7 }),
+    ownedBlip: readBlipStyle(v.ownedBlip, { sprite: 40, color: 2, scale: 0.7 }),
+    saleBlip: readBlipStyle(v.saleBlip, { sprite: 350, color: 0, scale: 0.7 }),
   };
 }
 

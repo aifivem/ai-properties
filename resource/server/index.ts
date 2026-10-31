@@ -11,7 +11,9 @@ import {
   onCharacter,
   onClientCallback,
   online,
+  onStop,
   resourceExport,
+  vehicleOf,
 } from "@aicore-fivem/lib/server";
 import {
   createLogger,
@@ -46,7 +48,6 @@ createDatabaseTables(ResourceName, "sql/main.sql")
   .then(() => owners.load())
   .catch((error: unknown) => log.error("database setup failed", error));
 
-const charIdOf = (source: number) => online.character(source)?.id;
 const sourceOf = (charId: number) => core.GetSourceByCharId(charId);
 const nameOf = (source: number) => online.name(source);
 const isPolice = (source: number) =>
@@ -118,7 +119,7 @@ const inside = interiors.inside;
 /** The property the player is in, when they own it. */
 function ownedInside(source: number): Property | null {
   const id = inside.get(source);
-  const charId = charIdOf(source);
+  const charId = online.charId(source);
   const property = id ? content.properties.get(id) : undefined;
   return property &&
     charId !== undefined &&
@@ -132,7 +133,7 @@ const idArgs = oneArg((v) => readText(v, 64));
 onClientCallback(
   EVENTS.mine,
   (source) => {
-    const charId = charIdOf(source);
+    const charId = online.charId(source);
     return {
       ok: true,
       list: charId === undefined ? [] : owners.accessList(charId),
@@ -146,7 +147,7 @@ onClientCallback(
   { args: idArgs, lock: true },
   async (source, id) => {
     const property = content.properties.get(id);
-    const charId = charIdOf(source);
+    const charId = online.charId(source);
     if (!property || charId === undefined || !isNear(source, property.door, 3))
       return fail("PROP_ERR_FAR");
     if (owners.get(id)) return fail("PROP_ERR_OWNED");
@@ -172,7 +173,7 @@ onClientCallback(EVENTS.enter, { args: idArgs, lock: true }, (source, id) => {
   const interior = property
     ? content.interiors.get(property.interior)
     : undefined;
-  const charId = charIdOf(source);
+  const charId = online.charId(source);
   if (
     !property ||
     !interior ||
@@ -180,8 +181,7 @@ onClientCallback(EVENTS.enter, { args: idArgs, lock: true }, (source, id) => {
     !isNear(source, property.door, 3)
   )
     return fail("PROP_ERR_FAR");
-  if (GetVehiclePedIsIn(GetPlayerPed(String(source)), false))
-    return fail("PROP_ERR_VEHICLE");
+  if (vehicleOf(source)) return fail("PROP_ERR_VEHICLE");
   if (
     !owners.accessOf(id, charId) &&
     !(content.settings.value.policeEnter && isPolice(source) && owners.get(id))
@@ -205,7 +205,7 @@ onClientCallback(
 onClientCallback(EVENTS.stash, (source) => {
   const id = inside.get(source);
   const property = id ? content.properties.get(id) : undefined;
-  const charId = charIdOf(source);
+  const charId = online.charId(source);
   if (
     !property ||
     charId === undefined ||
@@ -248,7 +248,7 @@ onClientCallback(
       3,
       (other) => inside.get(other) === property.id,
     );
-    const charId = target === null ? undefined : charIdOf(target);
+    const charId = target === null ? undefined : online.charId(target);
     if (target === null || charId === undefined) return fail("PROP_ERR_NOBODY");
     owners.giveKey(property.id, charId, nameOf(target));
     sendAccess(sourceOf, charId, property.id, "key");
@@ -310,6 +310,4 @@ onCharacter({
   unloaded: (source) => interiors.forget(source),
 });
 
-on("onResourceStop", (resource: string) => {
-  if (resource === ResourceName) interiors.stop();
-});
+onStop(() => interiors.stop());
