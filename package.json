@@ -1,6 +1,6 @@
 {
   "name": "ai-properties",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Houses and apartments: buy, enter a private interior, stash, keys, sell",
   "license": "GPL-3.0-only",
