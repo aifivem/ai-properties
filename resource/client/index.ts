@@ -10,7 +10,12 @@ import {
   Points,
   stateBoolean,
 } from "@aicore-fivem/lib/client";
-import { isRecord, readVec4, type Vec4 } from "@aicore-fivem/lib/shared";
+import {
+  isRecord,
+  readVec4,
+  RecordObjects,
+  type Vec4,
+} from "@aicore-fivem/lib/shared";
 import { CORE } from "@aicore-fivem/shared";
 import { Locale } from "common";
 import {
@@ -28,7 +33,6 @@ const owned = new GlobalGroup(OWNED_PREFIX, stateBoolean);
 const world = new AdminWorld(["settings", "properties", "interiors"]);
 const content = {
   settings: world.view("settings", readSettings),
-  properties: world.records("properties", readProperty),
   interiors: world.records("interiors", readInterior),
 };
 const FALLBACK = { fallback: "PROP_ERR_FAR" };
@@ -38,12 +42,22 @@ const call = (name: string, args: unknown[] = []) =>
 /**
  * Door points (buy, enter, locked; the label follows ownership), blips of the player's properties and properties for
  * sale, and the property menu at the interior entry while inside. Access comes as one snapshot, then deltas; a change
- * re-adds only that property's point.
+ * (ownership, access, its panel record) re-adds only that property's point.
  */
 class Homes {
   private readonly access = new Map<string, Access>();
   private readonly doors = new Points();
   private readonly inner = new Points();
+  /** One door point per panel record (after `access` and `doors`: it builds at once). */
+  private readonly properties = new RecordObjects(
+    world,
+    "properties",
+    readProperty,
+    (id, p) => {
+      this.add(p);
+      return () => this.doors.remove(id);
+    },
+  );
 
   async load(): Promise<void> {
     const reply = await callAction(EVENTS.mine, [], {
@@ -92,21 +106,19 @@ class Homes {
     });
   }
 
-  /** One property changed (ownership, access, its panel record). */
+  /** One property's ownership or access changed. */
   update(id: string): void {
-    const p = content.properties.get(id);
-    if (p) this.add(p);
-    else this.doors.remove(id);
+    this.properties.rebuild(id);
   }
 
+  /** Every door again (the access snapshot, blip looks in the settings). */
   rebuild(): void {
-    this.doors.clear();
-    for (const p of content.properties.values()) this.add(p);
+    this.properties.rebuildAll();
   }
 
   setInside(id: string | null): void {
     this.inner.clear();
-    const property = id ? content.properties.get(id) : undefined;
+    const property = id ? this.properties.records.get(id) : undefined;
     const interior = property
       ? content.interiors.get(property.interior)
       : undefined;
@@ -197,9 +209,6 @@ async function move(name: string, args: unknown[] = []): Promise<void> {
 const homes = new Homes();
 void homes.load();
 on(CORE.clientPlayerLoadedEvent, () => void homes.load());
-world.onChange("properties", (key) =>
-  key === undefined ? homes.rebuild() : homes.update(key),
-);
 world.onChange("settings", () => homes.rebuild());
 owned.onChange((id) => homes.update(id));
 
