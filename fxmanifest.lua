@@ -1,6 +1,6 @@
 name 'ai-properties'
 author 'TGIANN'
-version '0.1.0'
+version '0.1.0' -- x-release-please-version
 license 'GPL-3.0-only'
 description 'Houses and apartments: buy, enter a private interior, stash, keys, sell'
 repository 'https://github.com/aifivem/ai-properties'
