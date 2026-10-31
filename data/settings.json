@@ -7,5 +7,15 @@
   ],
   "policeEnter": true,
   "stashSlots": 40,
-  "stashWeight": 150000
+  "stashWeight": 150000,
+  "ownedBlip": {
+    "sprite": 40,
+    "color": 3,
+    "scale": 0.65
+  },
+  "saleBlip": {
+    "sprite": 40,
+    "color": 3,
+    "scale": 0.65
+  }
 }

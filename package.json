@@ -7,7 +7,7 @@
   "author": {
     "name": "TGIANN"
   },
-  "repository": "github:TGIANN/ai-properties",
+  "repository": "github:aifivem/ai-properties",
   "type": "module",
   "fxDependencies": [
     "/onesync",
