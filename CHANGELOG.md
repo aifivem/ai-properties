@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/aifivem/ai-properties/compare/v0.1.1...v0.1.2) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* rebuild with the current lib ([98bd52e](https://github.com/aifivem/ai-properties/commit/98bd52e357b43937f639e51b07adcced7c49f615))
+
 ## [0.1.1](https://github.com/aifivem/ai-properties/compare/v0.1.0...v0.1.1) (2026-10-31)
 
 
