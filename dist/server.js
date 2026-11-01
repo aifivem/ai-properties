@@ -442,7 +442,7 @@ var ClientGate = class {
 	}
 };
 // ../../../packages/lib/src/server/callback.ts
-const log$6 = createLogger(GetCurrentResourceName()), resource$4 = GetCurrentResourceName(), REFUSED = Symbol("refused");
+const log$6 = createLogger(GetCurrentResourceName()), resource$5 = GetCurrentResourceName(), REFUSED = Symbol("refused");
 function onClientCallback(name, first, second) {
 	let [handler, options] = typeof first == "function" ? [first, second ?? {}] : [second, first], gate = new ClientGate(name, options, 20);
 	onNet(requestEvent(name), async (caller, id, ...raw) => {
@@ -459,7 +459,7 @@ function onClientCallback(name, first, second) {
 	});
 }
 const pending$1 = new Map();
-onNet(responseEvent(resource$4), (id, ok, result) => {
+onNet(responseEvent(resource$5), (id, ok, result) => {
 	let entry = typeof id == "number" ? pending$1.get(id) : void 0;
 	entry && entry.source === Number(globalThis.source) && (pending$1.delete(id), clearTimeout(entry.timer), ok === !0 ? entry.resolve(result) : entry.reject(Error("client callback failed")));
 });
@@ -505,7 +505,7 @@ function toPatch(value) {
 		default: return null;
 	}
 }
-const clone = (value) => value === void 0 ? value : JSON.parse(JSON.stringify(value)), core$26 = resourceExport(CORE.resource), ERR = {
+const clone = (value) => value === void 0 ? value : JSON.parse(JSON.stringify(value)), core$27 = resourceExport(CORE.resource), ERR = {
 	type: "ADMIN_ERR_TYPE",
 	range: "ADMIN_ERR_RANGE",
 	length: "ADMIN_ERR_LENGTH",
@@ -519,7 +519,7 @@ const clone = (value) => value === void 0 ? value : JSON.parse(JSON.stringify(va
 		if (cached && Date.now() - cached.at < 2e3) return cached.values.size > 0 ? cached.values : null;
 		let list = [];
 		try {
-			list = core$26.GetLookupValues(source);
+			list = core$27.GetLookupValues(source);
 		} catch {}
 		let values = new Set(Array.isArray(list) ? list.filter((v) => typeof v == "string") : []);
 		return this.lists.set(source, {
@@ -648,11 +648,7 @@ function applyEdit(data, patch, spec) {
 	}
 	return [spec.kind === "records" ? patch.key : void 0];
 }
-// ../../../packages/lib/src/server/admin/jsonSchema.ts
-const SCHEMA_KEY = {
-	type: "string",
-	description: "This file's JSON Schema (for editors)."
-};
+// ../../../packages/lib/src/server/admin/descriptions.ts
 function langFile(resource) {
 	try {
 		let raw = JSON.parse(LoadResourceFile(resource, "locales/en.json") ?? "{}");
@@ -679,6 +675,11 @@ function describe(schema, file, lang) {
 	for (let tab of schema.tabs) if (tab.file === file) for (let card of tab.cards) collect(card.fields, "", lang, out);
 	return out;
 }
+// ../../../packages/lib/src/server/admin/jsonSchema.ts
+const SCHEMA_KEY = {
+	type: "string",
+	description: "This file's JSON Schema (for editors)."
+};
 function toJson(spec, path, desc) {
 	let description = desc.get(path), base = description ? { description } : {};
 	switch (spec.type) {
@@ -783,27 +784,20 @@ function writeSchema(resource, name, text, log) {
 	let dir = `${GetResourcePath(resource)}/data/schemas`;
 	(0, node_fs_promises.mkdir)(dir, { recursive: !0 }).then(() => (0, node_fs_promises.writeFile)(`${dir}/${name}.schema.json`, text, "utf8")).catch((error) => log.error(`writing ${resource}/${path} failed`, error));
 }
-// ../../../packages/lib/src/server/admin/panel.ts
-const core$25 = resourceExport(CORE.resource);
-var AdminPanel = class {
+// ../../../packages/lib/src/server/admin/panelFiles.ts
+const core$26 = resourceExport(CORE.resource);
+var PanelFiles = class {
 	schema;
 	data = new Map();
 	dataFiles = new Map();
 	handlers = new Map();
-	rules = new Map();
-	actions = new Map();
 	views = new FileViews((file) => this.get(file));
 	worldChanges = new Map();
 	resource = GetCurrentResourceName();
 	log = createLogger(this.resource);
-	editor = 0;
 	constructor(schema) {
 		this.schema = schema;
 		for (let [name, spec] of Object.entries(schema.files)) this.load(name, spec);
-		registerExport("AdminPanelSnapshot", () => this.snapshot()), registerExport("AdminPanelData", () => this.dataSnapshot()), registerExport("AdminPanelSummary", () => this.summary()), registerExport("AdminPanelApply", (admin, patch) => this.apply(admin, patch)), onClientCallback(ADMIN.worldChangesCallback(this.resource), () => Object.fromEntries(this.worldChanges), { rate: {
-			count: 4,
-			windowMs: 1e4
-		} }), setImmediate(() => core$25.RegisterAdminPanel(this.resource));
 	}
 	get(file) {
 		return this.data.get(file) ?? {};
@@ -811,17 +805,68 @@ var AdminPanel = class {
 	onChange(file, handler) {
 		this.handlers.set(file, [...this.handlers.get(file) ?? [], handler]);
 	}
-	rule(file, rule) {
-		this.rules.set(file, rule);
-	}
-	onAction(id, handler) {
-		this.actions.set(id, handler);
-	}
 	view(file, read) {
 		return this.views.view(file, read);
 	}
 	records(file, readOne) {
 		return this.views.records(file, readOne);
+	}
+	commit(file, key, value) {
+		let data = this.data.get(file);
+		data && (key === void 0 ? isRecord(value) && this.data.set(file, clone(value)) : value === null ? delete data[key] : data[key] = clone(value), this.changed(file, key));
+	}
+	commitAfter(file, key, value) {
+		setImmediate(() => this.commit(file, key, value));
+	}
+	store(patch, spec) {
+		let data = this.data.get(patch.file) ?? {}, keys = applyEdit(data, patch, spec);
+		if (keys.length !== 0) {
+			this.data.set(patch.file, data);
+			for (let key of keys) this.changed(patch.file, key);
+		}
+	}
+	changed(file, key) {
+		let spec = this.schema.files[file], data = this.get(file), value = key === void 0 ? data : data[key] ?? null;
+		this.dataFiles.get(file)?.write(data), this.views.changed(file, key, value);
+		for (let handler of this.handlers.get(file) ?? []) handler(key, value);
+		if (core$26.AdminPanelChanged({
+			resource: this.resource,
+			file,
+			key,
+			value: clone(value)
+		}), spec?.sync !== "all") return;
+		let changes = this.worldChanges.get(file) ?? {};
+		changes[key ?? ""] = clone(value), this.worldChanges.set(file, changes), emitNet(ADMIN.worldEvent(this.resource), -1, file, key ?? null, value);
+	}
+	load(name, spec) {
+		if (spec.memory) {
+			this.data.set(name, {});
+			return;
+		}
+		let file = new DataFile(this.resource, name, this.log);
+		this.dataFiles.set(name, file), file.schemaRef = `./schemas/${name}.schema.json`, writeSchema(this.resource, name, fileSchema(this.resource, this.schema, name, spec), this.log);
+		let raw = file.read(), data = isRecord(raw) ? raw : {}, filled = !1;
+		if (spec.kind === "settings") for (let [section, value] of Object.entries(spec.defaults ?? {})) section in data || (data[section] = clone(value), filled = !0);
+		this.data.set(name, data), (filled || raw === null || !file.hasSchemaRef()) && file.write(data);
+	}
+};
+// ../../../packages/lib/src/server/admin/panel.ts
+const core$25 = resourceExport(CORE.resource);
+var AdminPanel = class extends PanelFiles {
+	rules = new Map();
+	actions = new Map();
+	editor = 0;
+	constructor(schema) {
+		super(schema), registerExport("AdminPanelSnapshot", () => this.snapshot()), registerExport("AdminPanelData", () => this.dataSnapshot()), registerExport("AdminPanelSummary", () => this.summary()), registerExport("AdminPanelApply", (admin, patch) => this.apply(admin, patch)), onClientCallback(ADMIN.worldChangesCallback(this.resource), () => Object.fromEntries(this.worldChanges), { rate: {
+			count: 4,
+			windowMs: 1e4
+		} }), setImmediate(() => core$25.RegisterAdminPanel(this.resource));
+	}
+	rule(file, rule) {
+		this.rules.set(file, rule);
+	}
+	onAction(id, handler) {
+		this.actions.set(id, handler);
 	}
 	snapshot() {
 		return {
@@ -899,44 +944,6 @@ var AdminPanel = class {
 			};
 		}
 	}
-	commit(file, key, value) {
-		let data = this.data.get(file);
-		data && (key === void 0 ? isRecord(value) && this.data.set(file, clone(value)) : value === null ? delete data[key] : data[key] = clone(value), this.changed(file, key));
-	}
-	commitAfter(file, key, value) {
-		setImmediate(() => this.commit(file, key, value));
-	}
-	store(patch, spec) {
-		let data = this.data.get(patch.file) ?? {}, keys = applyEdit(data, patch, spec);
-		if (keys.length !== 0) {
-			this.data.set(patch.file, data);
-			for (let key of keys) this.changed(patch.file, key);
-		}
-	}
-	changed(file, key) {
-		let spec = this.schema.files[file], data = this.get(file), value = key === void 0 ? data : data[key] ?? null;
-		this.dataFiles.get(file)?.write(data), this.views.changed(file, key, value);
-		for (let handler of this.handlers.get(file) ?? []) handler(key, value);
-		if (core$25.AdminPanelChanged({
-			resource: this.resource,
-			file,
-			key,
-			value: clone(value)
-		}), spec?.sync !== "all") return;
-		let changes = this.worldChanges.get(file) ?? {};
-		changes[key ?? ""] = clone(value), this.worldChanges.set(file, changes), emitNet(ADMIN.worldEvent(this.resource), -1, file, key ?? null, value);
-	}
-	load(name, spec) {
-		if (spec.memory) {
-			this.data.set(name, {});
-			return;
-		}
-		let file = new DataFile(this.resource, name, this.log);
-		this.dataFiles.set(name, file), file.schemaRef = `./schemas/${name}.schema.json`, writeSchema(this.resource, name, fileSchema(this.resource, this.schema, name, spec), this.log);
-		let raw = file.read(), data = isRecord(raw) ? raw : {}, filled = !1;
-		if (spec.kind === "settings") for (let [section, value] of Object.entries(spec.defaults ?? {})) section in data || (data[section] = clone(value), filled = !0);
-		this.data.set(name, data), (filled || raw === null || !file.hasSchemaRef()) && file.write(data);
-	}
 };
 function labelOf(record, path) {
 	if (!path) return null;
@@ -993,7 +1000,7 @@ function reindex(index, source, before, after) {
 		set || index.set(name, set = new Set()), set.add(source);
 	}
 }
-var OnlinePlayers = class {
+var OnlineMirror = class {
 	players = new Map();
 	onDuty = new Map();
 	jobIndex = new Map();
@@ -1045,6 +1052,7 @@ var OnlinePlayers = class {
 		let set = this.onDuty.get(job);
 		set || this.onDuty.set(job, set = new Set()), set.add(source);
 	}
+}, OnlinePlayers = class extends OnlineMirror {
 	sources() {
 		return this.start(), this.players.keys();
 	}
@@ -1206,10 +1214,10 @@ new class {
 		let def = this.gangs.get(name);
 		return def === void 0 && this.gangs.set(name, def = core$19.GetGangDefinition(name) ?? null), def;
 	}
-}();
-// ../../../packages/lib/src/server/command.ts
+}(), createLogger(GetCurrentResourceName());
+// ../../../packages/lib/src/server/command/commandSet.ts
 const resource$3 = GetCurrentResourceName();
-createLogger(resource$3), new class {
+new class {
 	list = [];
 	sent = new Map();
 	announced = 0;
@@ -15549,7 +15557,7 @@ function onStop(fn) {
 		resource === self && fn();
 	});
 }
-// ../../../packages/lib/src/fivem/scheduler.ts
+// ../../../packages/lib/src/fivem/scheduler/group.ts
 var Group = class {
 	interval;
 	jobs = Array(8);
@@ -15636,9 +15644,8 @@ new class {
 		groups.length = kept, this.nextDue = soonest;
 	};
 }();
-// ../../../packages/lib/src/fivem/state.ts
+// ../../../packages/lib/src/fivem/state/mirror.ts
 const stateBoolean = (v) => typeof v == "boolean" ? v : void 0;
-IsDuplicityVersion();
 var Mirror = class {
 	key;
 	parse;
@@ -15658,6 +15665,8 @@ var Mirror = class {
 		if (this.values.set(id, value), old !== value) for (let listener of this.listeners) listener(id, value, old);
 	}
 };
+IsDuplicityVersion();
+// ../../../packages/lib/src/fivem/state/globalState.ts
 const prefixListeners = new Map();
 let prefixHandler = !1;
 function listenPrefix(prefix, listener) {
@@ -15687,7 +15696,10 @@ var GlobalGroup$1 = class extends Mirror {
 	ids() {
 		return this.values.keys();
 	}
-}, GlobalGroup = class extends GlobalGroup$1 {
+};
+IsDuplicityVersion();
+// ../../../packages/lib/src/server/state.ts
+var GlobalGroup = class extends GlobalGroup$1 {
 	set(id, value) {
 		GlobalState.set(this.prefix + id, value ?? null, !0), this.put(id, value);
 	}
@@ -15760,11 +15772,42 @@ function readProperty(id, v) {
 		blip: bool(v.blip, !1)
 	};
 }
-// resource/server/schema.ts
+// resource/server/schema/blip.ts
 const blip = {
 	type: "object",
 	optional: !0,
 	fields: BLIP_STYLE_FIELDS
+}, propertiesFile = {
+	kind: "records",
+	sync: "all",
+	labelPath: "label",
+	newRecord: {
+		label: "",
+		door: {
+			x: 0,
+			y: 0,
+			z: 0,
+			heading: 0
+		},
+		interior: "low",
+		price: 5e4,
+		blip: !1
+	},
+	sections: {
+		label: {
+			type: "text",
+			min: 1,
+			max: 48
+		},
+		door: { type: "vec4" },
+		interior: {
+			type: "text",
+			min: 1,
+			max: 48
+		},
+		price: spec.int(0, 1e9),
+		blip: { type: "bool" }
+	}
 }, propertiesSchema = {
 	title: "ADMIN_TITLE",
 	icon: "building-columns",
@@ -15794,38 +15837,7 @@ const blip = {
 				saleBlip: blip
 			}
 		},
-		properties: {
-			kind: "records",
-			sync: "all",
-			labelPath: "label",
-			newRecord: {
-				label: "",
-				door: {
-					x: 0,
-					y: 0,
-					z: 0,
-					heading: 0
-				},
-				interior: "low",
-				price: 5e4,
-				blip: !1
-			},
-			sections: {
-				label: {
-					type: "text",
-					min: 1,
-					max: 48
-				},
-				door: { type: "vec4" },
-				interior: {
-					type: "text",
-					min: 1,
-					max: 48
-				},
-				price: spec.int(0, 1e9),
-				blip: { type: "bool" }
-			}
-		},
+		properties: propertiesFile,
 		interiors: {
 			kind: "records",
 			sync: "all",
@@ -16006,7 +16018,36 @@ const blip = {
 			}]
 		}
 	]
-}, ownedFlags = new GlobalGroup("prop:", stateBoolean), log$1 = createLogger(ResourceName), owners = new class {
+}, core = resourceExport("ai-core"), panel = new AdminPanel(propertiesSchema), content = {
+	settings: panel.view("settings", readSettings),
+	properties: panel.records("properties", readProperty),
+	interiors: panel.records("interiors", readInterior)
+}, interiors = new class {
+	inside = new Map();
+	worlds = new Map();
+	move(source, at, id) {
+		let previous = this.inside.get(source);
+		previous !== id && (previous && this.leave(previous), id && this.enter(id)), id ? this.inside.set(source, id) : this.inside.delete(source), SetPlayerRoutingBucket(String(source), id ? this.worlds.get(id)?.bucket ?? 0 : 0), core.SetMeta(source, INSIDE_META, id), emitNet(EVENTS.inside, source, id, at);
+	}
+	forget(source) {
+		let id = this.inside.get(source);
+		id !== void 0 && (this.inside.delete(source), this.leave(id));
+	}
+	stop() {
+		for (let source of this.inside.keys()) SetPlayerRoutingBucket(String(source), 0);
+	}
+	enter(id) {
+		let world = this.worlds.get(id);
+		world ? world.count++ : this.worlds.set(id, {
+			bucket: buckets.acquire(`property:${id}`),
+			count: 1
+		});
+	}
+	leave(id) {
+		let world = this.worlds.get(id);
+		!world || --world.count > 0 || (this.worlds.delete(id), buckets.release(world.bucket));
+	}
+}(), inside = interiors.inside, ownedFlags = new GlobalGroup("prop:", stateBoolean), log$1 = createLogger(ResourceName), owners = new class {
 	byProperty = new Map();
 	byChar = new Map();
 	selling = new Set();
@@ -16093,44 +16134,17 @@ function sendAccess(sourceOf, charId, id, access) {
 	let source = sourceOf(charId);
 	source !== null && emitNet(EVENTS.access, source, id, access);
 }
-// resource/server/index.ts
-const log = createLogger(ResourceName), core = resourceExport("ai-core"), panel = new AdminPanel(propertiesSchema), content = {
-	settings: panel.view("settings", readSettings),
-	properties: panel.records("properties", readProperty),
-	interiors: panel.records("interiors", readInterior)
-};
-aiLogChannels({ properties: {} }), createDatabaseTables(ResourceName, "sql/main.sql").then(() => owners.load()).catch((error) => log.error("database setup failed", error));
-const sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => online.name(source), isPolice = (source) => online.onDutyIn(source, content.settings.value.policeJobs), interiors = new class {
-	inside = new Map();
-	worlds = new Map();
-	move(source, at, id) {
-		let previous = this.inside.get(source);
-		previous !== id && (previous && this.leave(previous), id && this.enter(id)), id ? this.inside.set(source, id) : this.inside.delete(source), SetPlayerRoutingBucket(String(source), id ? this.worlds.get(id)?.bucket ?? 0 : 0), core.SetMeta(source, INSIDE_META, id), emitNet(EVENTS.inside, source, id, at);
-	}
-	forget(source) {
-		let id = this.inside.get(source);
-		id !== void 0 && (this.inside.delete(source), this.leave(id));
-	}
-	stop() {
-		for (let source of this.inside.keys()) SetPlayerRoutingBucket(String(source), 0);
-	}
-	enter(id) {
-		let world = this.worlds.get(id);
-		world ? world.count++ : this.worlds.set(id, {
-			bucket: buckets.acquire(`property:${id}`),
-			count: 1
-		});
-	}
-	leave(id) {
-		let world = this.worlds.get(id);
-		!world || --world.count > 0 || (this.worlds.delete(id), buckets.release(world.bucket));
-	}
-}(), inside = interiors.inside;
-function ownedInside(source) {
-	let id = inside.get(source), charId = online.charId(source), property = id ? content.properties.get(id) : void 0;
-	return property && charId !== void 0 && owners.accessOf(property.id, charId) === "owner" ? property : null;
-}
-const idArgs = oneArg((v) => readText(v, 64));
+// resource/server/lifecycle.ts
+const log = createLogger(ResourceName);
+aiLogChannels({ properties: {} }), createDatabaseTables(ResourceName, "sql/main.sql").then(() => owners.load()).catch((error) => log.error("database setup failed", error)), onCharacter({
+	loaded: (source) => {
+		let id = core.GetMeta(source, INSIDE_META), property = typeof id == "string" ? content.properties.get(id) : void 0;
+		property && interiors.move(source, property.door, null);
+	},
+	unloaded: (source) => interiors.forget(source)
+}), onStop(() => interiors.stop());
+// resource/server/players.ts
+const sourceOf = (charId) => core.GetSourceByCharId(charId), nameOf = (source) => online.name(source), isPolice = (source) => online.onDutyIn(source, content.settings.value.policeJobs), idArgs = oneArg((v) => readText(v, 64));
 onClientCallback(EVENTS.mine, (source) => {
 	let charId = online.charId(source);
 	return {
@@ -16161,7 +16175,13 @@ onClientCallback(EVENTS.mine, (source) => {
 }), onClientCallback(EVENTS.exit, (source) => {
 	let property = content.properties.get(inside.get(source) ?? "");
 	return property ? (interiors.move(source, property.door, null), { ok: !0 }) : fail("PROP_ERR_FAR");
-}, { lock: !0 }), onClientCallback(EVENTS.stash, (source) => {
+}, { lock: !0 });
+// resource/server/inside.ts
+function ownedInside(source) {
+	let id = inside.get(source), charId = online.charId(source), property = id ? content.properties.get(id) : void 0;
+	return property && charId !== void 0 && owners.accessOf(property.id, charId) === "owner" ? property : null;
+}
+onClientCallback(EVENTS.stash, (source) => {
 	let id = inside.get(source), property = id ? content.properties.get(id) : void 0, charId = online.charId(source);
 	if (!property || charId === void 0 || !owners.accessOf(property.id, charId)) return fail("PROP_ERR_LOCKED");
 	let owner = owners.get(property.id)?.owner;
@@ -16199,10 +16219,4 @@ onClientCallback(EVENTS.mine, (source) => {
 		source,
 		metadata: { refund }
 	}), { ok: !0 };
-}, { lock: !0 }), onCharacter({
-	loaded: (source) => {
-		let id = core.GetMeta(source, INSIDE_META), property = typeof id == "string" ? content.properties.get(id) : void 0;
-		property && interiors.move(source, property.door, null);
-	},
-	unloaded: (source) => interiors.forget(source)
-}), onStop(() => interiors.stop());
+}, { lock: !0 });

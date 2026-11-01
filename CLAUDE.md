@@ -20,4 +20,5 @@ Houses and apartments bought at their door: a private copy of the interior per p
 
 ## Entry points
 
-- Actions and buckets `resource/server/index.ts`, ownership store `resource/server/store.ts`; doors, blips and the inside menu `resource/client/index.ts`.
+- Server: door actions (list, buy, enter, exit) `resource/server/door.ts`, inside actions (stash, keys, sell) `server/inside.ts`, who is inside and the buckets `server/interiors.ts`, start / character / stop hooks `server/lifecycle.ts`, ownership store `server/store.ts`, panel `server/content.ts` + `server/schema/` (one file per tab).
+- Client: doors and blips `resource/client/homes/homes.ts`, door and inside menus `homes/menus.ts`, its events `homes/index.ts`.
