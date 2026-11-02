@@ -3,7 +3,7 @@ import {
   callAction,
   GlobalGroup,
   stateBoolean,
-} from "@aicore-fivem/lib/client";
+} from "@aifivem/lib/client";
 import { OWNED_PREFIX, readInterior, readSettings } from "common/property";
 
 export const owned = new GlobalGroup(OWNED_PREFIX, stateBoolean);

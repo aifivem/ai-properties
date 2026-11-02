@@ -5,8 +5,8 @@ import {
   onClientCallback,
   online,
   vehicleOf,
-} from "@aicore-fivem/lib/server";
-import { fail, oneArg, readText } from "@aicore-fivem/lib/shared";
+} from "@aifivem/lib/server";
+import { fail, oneArg, readText } from "@aifivem/lib/shared";
 import { Locale } from "common";
 import { EVENTS } from "common/property";
 import { content, core } from "./content";

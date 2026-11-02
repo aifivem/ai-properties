@@ -1,4 +1,4 @@
-import { online } from "@aicore-fivem/lib/server";
+import { online } from "@aifivem/lib/server";
 import { core } from "./content";
 
 export const sourceOf = (charId: number) => core.GetSourceByCharId(charId);

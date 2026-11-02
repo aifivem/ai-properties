@@ -1,5 +1,5 @@
-import { buckets } from "@aicore-fivem/lib/server";
-import type { Vec4 } from "@aicore-fivem/lib/shared";
+import { buckets } from "@aifivem/lib/server";
+import type { Vec4 } from "@aifivem/lib/shared";
 import { EVENTS, INSIDE_META } from "common/property";
 import { core } from "./content";
 

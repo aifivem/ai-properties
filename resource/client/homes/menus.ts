@@ -1,5 +1,5 @@
-import { fadeIn, fadeOut, menu } from "@aicore-fivem/lib/client";
-import { isRecord } from "@aicore-fivem/lib/shared";
+import { fadeIn, fadeOut, menu } from "@aifivem/lib/client";
+import { isRecord } from "@aifivem/lib/shared";
 import { Locale } from "common";
 import { EVENTS, type Property } from "common/property";
 import { call, owned } from "./content";

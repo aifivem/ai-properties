@@ -1,6 +1,6 @@
-import { onServerEvent, player } from "@aicore-fivem/lib/client";
-import { readVec4, type Vec4 } from "@aicore-fivem/lib/shared";
-import { CORE } from "@aicore-fivem/shared";
+import { onServerEvent, player } from "@aifivem/lib/client";
+import { readVec4, type Vec4 } from "@aifivem/lib/shared";
+import { CORE } from "@aifivem/shared";
 import { EVENTS, type Access } from "common/property";
 import { owned, world } from "./content";
 import { Homes } from "./homes";
