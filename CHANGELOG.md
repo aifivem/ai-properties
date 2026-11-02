@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/aifivem/ai-properties/compare/v0.1.3...v0.1.4) (2026-11-02)
+
+
+### Code Refactoring
+
+* import the shared packages from [@aifivem](https://github.com/aifivem) ([152cf03](https://github.com/aifivem/ai-properties/commit/152cf039cfe51850e14fb5265d0a9692a7110d70))
+
 ## [0.1.3](https://github.com/aifivem/ai-properties/compare/v0.1.2...v0.1.3) (2026-11-01)
 
 
