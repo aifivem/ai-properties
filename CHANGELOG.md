@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.5](https://github.com/aifivem/ai-properties/compare/v0.1.4...v0.1.5) (2026-11-02)
+
+
+### Documentation
+
+* install from the release zip ([41c3eb4](https://github.com/aifivem/ai-properties/commit/41c3eb44842ea7996923814d0553187580fd90dd))
+
+
+### Miscellaneous Chores
+
+* build files are no longer in git, the release zip carries them ([28524a2](https://github.com/aifivem/ai-properties/commit/28524a2e62eb7d904289c1b32ef7968d45c75775))
+
 ## [0.1.4](https://github.com/aifivem/ai-properties/compare/v0.1.3...v0.1.4) (2026-11-02)
 
 
